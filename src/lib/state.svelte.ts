@@ -70,6 +70,9 @@ class CashCounter {
 	inputs = $state<(HTMLInputElement | null)[]>([]);
 	scroller = $state<HTMLElement | null>(null);
 
+	/** True until the first key is pressed on the row the cursor moved to. */
+	freshRow = true;
+
 	#toastTimer: ReturnType<typeof setTimeout> | undefined;
 	#wsTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -176,11 +179,21 @@ class CashCounter {
 		this.saveWorkspace();
 	}
 
+	/**
+	 * Marks a row as just-landed-on. With "select all" on, the next digit
+	 * replaces what is there instead of appending to it — the keypad's
+	 * equivalent of the system keyboard selecting the field's text.
+	 */
+	setActive(i: number): void {
+		this.active = i;
+		this.freshRow = true;
+	}
+
 	/** Moves the cursor, clamped to the visible denominations. */
 	focusIdx(i: number, select = true): void {
 		const last = this.live.length - 1;
 		const next = Math.min(Math.max(i, 0), last < 0 ? 0 : last);
-		this.active = next;
+		this.setActive(next);
 		this.reveal(next);
 		const el = this.inputs[next];
 		if (el && this.mode === 'sys') {
@@ -212,9 +225,15 @@ class CashCounter {
 		if (key === 'prev') return this.focusIdx(this.active - 1);
 		if (key === 'hide') return this.setMode('sys');
 		if (cents === undefined) return;
+
+		// First key on a row the cursor just landed on types over the old
+		// number; everything after that appends to it.
+		const replace = this.freshRow && this.cfg.selectAll;
+		this.freshRow = false;
+
 		if (key === 'clr') return this.setQty(cents, '');
 		if (key === 'del') return this.setQty(cents, String(this.qty[cents] ?? '').slice(0, -1));
-		this.setQty(cents, String(this.qty[cents] ?? '') + key);
+		this.setQty(cents, (replace ? '' : String(this.qty[cents] ?? '')) + key);
 	}
 
 	/* ---------- editor mode ---------- */

@@ -1,5 +1,8 @@
 # cash-count — EuroCash
 
+**Live: [cash.invition.dev](https://cash.invition.dev)** — installable, and works
+with no connection once installed.
+
 Euro cash counting for a till: type quantities per denomination, get a running
 total, save the count into a dated slot with optional photo evidence. Everything
 lives on the device — there is no backend and no network call at runtime.
@@ -75,7 +78,9 @@ API is reached from `onMount` or an event handler.
 
 Two editors share the same rows: **SYS** uses the device keyboard, **PAD** marks
 the inputs read-only and drives them from the on-screen keypad, which is how the
-soft keyboard stays down on a phone. In landscape the keypad moves beside the
+soft keyboard stays down on a phone. "Select all when moving between rows" covers
+both: the system keyboard selects the field's text, and on the keypad the first
+key pressed after moving to a row types over the old number instead of appending. In landscape the keypad moves beside the
 list and can be flipped to either side.
 
 The slot dialog fills the whole counting area and gives the photo as much room as

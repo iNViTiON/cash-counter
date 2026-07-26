@@ -3,12 +3,13 @@
 	import { app } from '$lib/state.svelte';
 
 	function pick(i: number): void {
-		app.active = i;
+		app.setActive(i);
 		app.reveal(i);
 		if (app.mode === 'sys') app.inputs[i]?.focus();
 	}
 
 	function onInput(e: Event & { currentTarget: HTMLInputElement }, cents: number): void {
+		app.freshRow = false;
 		app.setQty(cents, e.currentTarget.value);
 		// setQty strips anything that is not a digit, so push the cleaned value
 		// back into the field or the rejected characters stay on screen.
@@ -16,7 +17,7 @@
 	}
 
 	function onFocus(e: FocusEvent & { currentTarget: HTMLInputElement }, i: number): void {
-		app.active = i;
+		app.setActive(i);
 		if (app.cfg.selectAll && app.mode === 'sys') {
 			try {
 				e.currentTarget.select();
