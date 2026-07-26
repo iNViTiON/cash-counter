@@ -1,0 +1,3 @@
+# Cloudflare Pages serves matching static assets first; anything left over is
+# rewritten onto the SPA shell so client-side routes survive a hard reload.
+/*  /index.html  200

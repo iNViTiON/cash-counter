@@ -1,0 +1,175 @@
+:root {
+	--bg: #0f0f10;
+	--bar: #141518;
+	--card: #17181b;
+	--strip: #121316;
+	--sunk: #0e0f11;
+	--chip: #1b1d20;
+	--chip-on: #24262b;
+	--key: #22252a;
+
+	--line: #2b2e33;
+	--line-soft: #23262a;
+	--line-strong: #33373d;
+	--line-input: #2f3237;
+
+	--fg: #e8e4dc;
+	--fg-dim: #c9c4ba;
+	--muted: #8e9199;
+	--muted-2: #7e828b;
+	--muted-3: #6e727a;
+	--muted-4: #5e626a;
+	--muted-5: #4e5259;
+
+	--acc: #ffb020;
+	--acc-hi: #ffc44d;
+	--acc-ink: #141414;
+	--danger: #ff6b58;
+
+	--sans: Archivo, system-ui, -apple-system, sans-serif;
+	--mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	background: var(--bg);
+	overflow: hidden;
+	overscroll-behavior: none;
+}
+
+body {
+	-webkit-text-size-adjust: 100%;
+	color: var(--fg);
+	font-family: var(--sans);
+}
+
+* {
+	box-sizing: border-box;
+	-webkit-tap-highlight-color: transparent;
+}
+
+a {
+	color: var(--acc);
+	text-decoration: none;
+}
+
+a:hover {
+	color: var(--acc-hi);
+}
+
+input {
+	font-family: var(--mono);
+}
+
+::selection {
+	background: var(--acc);
+	color: var(--acc-ink);
+}
+
+/* Thin scrollbar on panes that scroll, none at all on the chip rails. */
+.sc::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.sc::-webkit-scrollbar-thumb {
+	background: var(--line-input);
+	border-radius: 8px;
+}
+
+.no-sb {
+	scrollbar-width: none;
+}
+
+.no-sb::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+
+/* Shared primitives — repeated verbatim across five components otherwise. */
+.btn {
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	background: var(--chip);
+	color: var(--fg-dim);
+	cursor: pointer;
+	font-family: var(--sans);
+	font-weight: 700;
+	letter-spacing: 0.1em;
+}
+
+.btn:hover {
+	border-color: var(--acc);
+	color: var(--acc);
+}
+
+.btn-danger:hover {
+	border-color: var(--danger);
+	color: var(--danger);
+}
+
+.btn-primary {
+	border: 0;
+	border-radius: 9px;
+	background: var(--acc);
+	color: var(--acc-ink);
+	cursor: pointer;
+	font-family: var(--sans);
+	font-weight: 700;
+	letter-spacing: 0.1em;
+}
+
+.btn-primary:hover {
+	background: var(--acc-hi);
+}
+
+.seg {
+	display: flex;
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.seg button {
+	height: 34px;
+	border: 0;
+	cursor: pointer;
+	font-family: var(--sans);
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	white-space: nowrap;
+	background: var(--chip);
+	color: var(--muted);
+}
+
+.seg button + button {
+	border-left: 1px solid var(--line-strong);
+}
+
+.seg button.on {
+	background: var(--acc);
+	color: var(--acc-ink);
+}
+
+.label {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	color: var(--muted-2);
+}
+
+.hint {
+	font-size: 11px;
+	color: var(--muted-4);
+}
+
+.card {
+	background: var(--card);
+	border: 1px solid var(--line-soft);
+	border-radius: 12px;
+	padding: 14px;
+}
