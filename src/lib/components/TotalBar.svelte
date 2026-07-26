@@ -20,7 +20,27 @@
 	{/if}
 
 	<div class="actions">
-		<button type="button" class="btn wide" onclick={() => (app.view = 'camera')}>PHOTO</button>
+		<button type="button" class="btn wide" onclick={() => app.openCamera()}>PHOTO</button>
+
+		<!--
+			Both inputs stay mounted for the life of the app: `.click()` only opens a
+			file dialog while the originating tap is still being handled, so neither
+			can be created at the moment it is needed.
+		-->
+		<input
+			bind:this={app.sysCamInput}
+			type="file"
+			accept="image/*"
+			capture="environment"
+			onchange={(e) => app.pickFile(e.currentTarget)}
+		/>
+		<input
+			bind:this={app.fileInput}
+			type="file"
+			accept="image/*"
+			onchange={(e) => app.pickFile(e.currentTarget)}
+		/>
+
 		<button type="button" class="btn btn-danger wide" onclick={() => app.clearAll()}>CLEAR</button>
 		<button type="button" class="btn-primary save" onclick={() => app.commitSave()}>SAVE</button>
 	</div>
@@ -102,6 +122,10 @@
 		display: flex;
 		gap: 8px;
 		flex-wrap: wrap;
+	}
+
+	.actions input {
+		display: none;
 	}
 
 	.wide {

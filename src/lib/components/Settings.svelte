@@ -1,13 +1,19 @@
 <script lang="ts">
 	import { CENTS, denomLabel, dmy, hm, money } from '$lib/format';
 	import { app } from '$lib/state.svelte';
-	import type { PadSize } from '$lib/types';
+	import type { PadSize, PhotoMax } from '$lib/types';
 
 	const PAD_SIZES: Array<[string, PadSize]> = [
 		['S', 25],
 		['M', 50],
 		['L', 75],
 		['XL', 100]
+	];
+
+	const PHOTO_SIZES: Array<[string, PhotoMax]> = [
+		['SMALL', 1280],
+		['MEDIUM', 1800],
+		['LARGE', 2400]
 	];
 
 	const today = $derived(dmy(new Date()));
@@ -101,6 +107,98 @@
 								type="button"
 								class:on={(app.cfg.padSize || 50) === size}
 								onclick={() => app.setPadSize(size)}
+							>
+								{name}
+							</button>
+						{/each}
+					</div>
+				</div>
+			</section>
+
+			<section class="card">
+				<div class="label gap">PHOTO EVIDENCE</div>
+
+				<div class="setting div-bottom">
+					<div class="text">
+						<div class="name">Camera for photo evidence</div>
+						<div class="hint">
+							System hands off to your phone's camera app — full sensor quality, autofocus, flash.
+							In-app stays inside EuroCash but the preview is lower quality.
+						</div>
+					</div>
+					<div class="seg">
+						<button
+							type="button"
+							class:on={app.cfg.cam !== 'app'}
+							onclick={() => app.setCam('system')}
+						>
+							SYSTEM
+						</button>
+						<button
+							type="button"
+							class:on={app.cfg.cam === 'app'}
+							onclick={() => app.setCam('app')}
+						>
+							IN-APP
+						</button>
+					</div>
+				</div>
+
+				<div class="setting div-bottom">
+					<div class="text">
+						<div class="name">Require a photo when saving</div>
+						<div class="hint">A count can't be saved to a slot without photo evidence attached.</div>
+					</div>
+					<button
+						type="button"
+						class="switch"
+						class:on={app.cfg.needPhoto}
+						aria-pressed={app.cfg.needPhoto}
+						aria-label="Require a photo when saving"
+						onclick={() => app.toggleNeedPhoto()}
+					>
+						<span class="knob"></span>
+					</button>
+				</div>
+
+				<div class="setting div-bottom nested" class:dim={!app.cfg.needPhoto}>
+					<div class="text">
+						<div class="name">Allow skipping with confirmation</div>
+						<div class="hint">
+							Saving without a photo is still possible, but only after confirming once.
+						</div>
+					</div>
+					<!--
+						The track only lights up while the requirement above it is on, but the
+						knob always shows what is stored, so the two are separate classes.
+					-->
+					<button
+						type="button"
+						class="switch"
+						class:on={app.cfg.needPhoto && app.cfg.allowSkip}
+						class:knob-on={app.cfg.allowSkip}
+						aria-pressed={app.cfg.allowSkip}
+						aria-label="Allow skipping with confirmation"
+						onclick={() => app.toggleAllowSkip()}
+					>
+						<span class="knob"></span>
+					</button>
+				</div>
+
+				<div class="setting">
+					<div class="text">
+						<div class="name">Stored photo size</div>
+						<div class="hint">
+							Longest edge of the saved image. Larger reads better; smaller fits more slots on the
+							device.
+						</div>
+					</div>
+					<div class="seg">
+						{#each PHOTO_SIZES as [name, max] (max)}
+							<button
+								type="button"
+								class:on={app.photoMax === max}
+								onclick={() => app.setPhotoMax(max)}
 							>
 								{name}
 							</button>
@@ -326,6 +424,17 @@
 		border-top: 1px solid var(--line-soft);
 	}
 
+	/* Reads as belonging to the setting above it, and greys out when that is off. */
+	.nested {
+		padding-left: 18px;
+		border-left: 2px solid var(--line-soft);
+	}
+
+	/* Dimmed but still tappable — the toggle explains why it does nothing. */
+	.dim {
+		opacity: 0.42;
+	}
+
 	.text {
 		flex: 1;
 		min-width: 0;
@@ -373,7 +482,8 @@
 		transition: left 0.12s;
 	}
 
-	.switch.on .knob {
+	.switch.on .knob,
+	.switch.knob-on .knob {
 		left: 32px;
 	}
 

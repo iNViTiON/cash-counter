@@ -1,10 +1,21 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import { encodePhoto } from '$lib/photo';
 	import { app } from '$lib/state.svelte';
 
-	/** Long edge of the stored evidence photo — localStorage is only 5 MB. */
-	const MAX_EDGE = 1280;
-	const QUALITY = 0.7;
+	/**
+	 * Asked for in this order — the first the device grants wins. Phones hand
+	 * back a soft 480p stream if nothing is requested, which is what made the
+	 * in-app shots look worse than the ones from the camera app.
+	 */
+	const TRIES: MediaTrackConstraints[] = [
+		{ facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } },
+		{ facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+		{ facingMode: { ideal: 'environment' } }
+	];
+
+	/** How long to wait between checks for the stream reporting its size. */
+	const RES_POLL_MS = 150;
 
 	let video = $state<HTMLVideoElement | null>(null);
 	let stream: MediaStream | null = null;
@@ -12,20 +23,23 @@
 
 	onMount(async () => {
 		app.camErr = null;
-		try {
-			const s = await navigator.mediaDevices.getUserMedia({
-				video: { facingMode: { ideal: 'environment' } },
-				audio: false
-			});
-			if (gone) return s.getTracks().forEach((t) => t.stop());
-			stream = s;
-			if (video) {
-				video.srcObject = s;
-				video.play().catch(() => {});
+		app.camRes = '';
+
+		for (let i = 0; i < TRIES.length; i++) {
+			try {
+				const s = await navigator.mediaDevices.getUserMedia({ video: TRIES[i], audio: false });
+				if (gone) return s.getTracks().forEach((t) => t.stop());
+				stream = s;
+				// Show the preview first: tuning is independent of it, and on some
+				// devices `applyConstraints` takes long enough to be noticed.
+				attach(s);
+				await tune(s);
+				return;
+			} catch (e) {
+				if (i < TRIES.length - 1) continue;
+				const name = e instanceof Error ? e.name : 'error';
+				app.camErr = `Camera not available (${name}). Use the system camera or pick a file.`;
 			}
-		} catch (e) {
-			const name = e instanceof Error ? e.name : 'error';
-			app.camErr = `Camera not available (${name}). Pick a file instead.`;
 		}
 	});
 
@@ -34,6 +48,37 @@
 		stopCam();
 	});
 
+	/** Continuous focus, exposure and white balance where the device offers them. */
+	async function tune(s: MediaStream): Promise<void> {
+		const track = s.getVideoTracks()[0];
+		if (!track) return;
+		try {
+			await track.applyConstraints({
+				advanced: [
+					{ focusMode: 'continuous' },
+					{ exposureMode: 'continuous' },
+					{ whiteBalanceMode: 'continuous' }
+				]
+			});
+		} catch {
+			/* unsupported on this device — the untuned stream is still usable */
+		}
+	}
+
+	function attach(s: MediaStream): void {
+		if (!video) return;
+		video.srcObject = s;
+		video.play().catch(() => {});
+		showRes();
+	}
+
+	/** The track only reports its real size once frames start arriving. */
+	function showRes(): void {
+		if (gone) return;
+		if (video?.videoWidth) app.camRes = `${video.videoWidth}×${video.videoHeight}`;
+		else setTimeout(showRes, RES_POLL_MS);
+	}
+
 	function stopCam(): void {
 		stream?.getTracks().forEach((t) => t.stop());
 		stream = null;
@@ -41,50 +86,52 @@
 	}
 
 	function close(): void {
-		app.camErr = null;
-		app.view = null;
-	}
-
-	function downscale(source: HTMLVideoElement | HTMLImageElement, w: number, h: number): string {
-		const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
-		const canvas = document.createElement('canvas');
-		canvas.width = Math.round(w * scale);
-		canvas.height = Math.round(h * scale);
-		canvas.getContext('2d')?.drawImage(source, 0, 0, canvas.width, canvas.height);
-		return canvas.toDataURL('image/jpeg', QUALITY);
-	}
-
-	function shoot(): void {
-		if (!video?.videoWidth) return app.say('No camera frame yet');
-		const data = downscale(video, video.videoWidth, video.videoHeight);
 		stopCam();
+		app.camErr = null;
+		app.camRes = '';
 		app.view = null;
-		app.setPhoto(data);
-		app.say('Photo attached');
 	}
 
-	function pickFile(e: Event & { currentTarget: HTMLInputElement }): void {
-		const file = e.currentTarget.files?.[0];
-		if (!file) return;
-		const reader = new FileReader();
-		reader.onload = () => {
-			const img = new Image();
-			img.onload = () => {
-				const data = downscale(img, img.width, img.height);
-				app.camErr = null;
-				app.view = null;
-				app.setPhoto(data);
-				app.say('Photo attached');
-			};
-			img.src = String(reader.result);
-		};
-		reader.readAsDataURL(file);
+	async function shoot(): Promise<void> {
+		if (!video?.videoWidth) return app.say('No camera frame yet');
+
+		// A real still off the track is far sharper than a preview frame, so try
+		// that first and keep the frame grab for devices without ImageCapture.
+		const track = stream?.getVideoTracks()[0];
+		if (track && window.ImageCapture) {
+			try {
+				const blob = await new window.ImageCapture(track).takePhoto();
+				const bmp = await createImageBitmap(blob);
+				const still = encodePhoto(bmp, bmp.width, bmp.height, app.photoMax);
+				stopCam();
+				app.attachPhoto(still);
+				return;
+			} catch {
+				/* the track will not take a still — fall through to the frame grab */
+			}
+		}
+
+		const data = encodePhoto(video, video.videoWidth, video.videoHeight, app.photoMax);
+		stopCam();
+		app.attachPhoto(data);
+	}
+
+	/** Both hand off to an input that outlives this overlay, so the stream goes first. */
+	function useSysCam(): void {
+		close();
+		app.openSysCam();
+	}
+
+	function useFile(): void {
+		close();
+		app.pickAnyFile();
 	}
 </script>
 
 <div class="overlay">
 	<div class="head">
 		<div class="title">PHOTO EVIDENCE</div>
+		<div class="res">{app.camRes}</div>
 		<div class="spacer"></div>
 		<button type="button" class="btn close" title="Close" onclick={close}>✕</button>
 	</div>
@@ -96,16 +143,15 @@
 		{#if app.camErr}
 			<div class="err">
 				<div class="msg">{app.camErr}</div>
-				<label class="file">
-					CHOOSE A FILE
-					<input type="file" accept="image/*" onchange={pickFile} />
-				</label>
+				<button type="button" class="btn file" onclick={useFile}>CHOOSE A FILE</button>
 			</div>
 		{/if}
 	</div>
 
 	<div class="foot">
+		<button type="button" class="btn hand" onclick={useSysCam}>SYSTEM<br />CAMERA</button>
 		<button type="button" class="shoot" onclick={shoot}>SHOOT</button>
+		<button type="button" class="btn hand" onclick={useFile}>CHOOSE<br />FILE</button>
 	</div>
 </div>
 
@@ -133,6 +179,12 @@
 		font-weight: 700;
 		letter-spacing: 0.1em;
 		color: var(--fg);
+	}
+
+	.res {
+		font-family: var(--mono);
+		font-size: 10px;
+		color: var(--muted-3);
 	}
 
 	.spacer {
@@ -187,20 +239,8 @@
 	.file {
 		height: 44px;
 		padding: 0 18px;
-		display: inline-flex;
-		align-items: center;
-		border: 1px solid var(--line-strong);
 		border-radius: 9px;
-		background: var(--chip);
-		color: var(--fg-dim);
-		cursor: pointer;
 		font-size: 11px;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-	}
-
-	.file input {
-		display: none;
 	}
 
 	.foot {
@@ -208,11 +248,22 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 16px;
+		gap: 14px;
 		padding: 14px;
 	}
 
+	.hand {
+		flex: 0 0 auto;
+		height: 44px;
+		padding: 0 14px;
+		border-radius: 9px;
+		font-size: 10px;
+		line-height: 1.3;
+		text-align: center;
+	}
+
 	.shoot {
+		flex: 0 0 auto;
 		width: 74px;
 		height: 74px;
 		border-radius: 50%;

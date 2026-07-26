@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import Camera from '$lib/components/Camera.svelte';
+	import CameraPick from '$lib/components/CameraPick.svelte';
 	import DenomList from '$lib/components/DenomList.svelte';
 	import Keypad from '$lib/components/Keypad.svelte';
+	import PhotoRequired from '$lib/components/PhotoRequired.svelte';
 	import SaveBar from '$lib/components/SaveBar.svelte';
 	import Settings from '$lib/components/Settings.svelte';
 	import SlotDetail from '$lib/components/SlotDetail.svelte';
@@ -120,6 +122,14 @@
 
 	{#if app.view === 'settings'}
 		<Settings />
+	{/if}
+
+	{#if app.view === 'campick'}
+		<CameraPick />
+	{/if}
+
+	{#if app.view === 'needphoto'}
+		<PhotoRequired />
 	{/if}
 
 	<Toast />

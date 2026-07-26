@@ -25,9 +25,13 @@ export type PadKey =
 	| 'hide';
 export type PadSide = 'left' | 'right';
 export type SaveDay = 'today' | 'yesterday';
-export type View = null | 'slot' | 'camera' | 'settings';
+export type View = null | 'slot' | 'camera' | 'settings' | 'campick' | 'needphoto';
 export type MaxAge = 7 | 31;
 export type PadSize = 25 | 50 | 75 | 100;
+/** Where a photo comes from: the phone's own camera app, or the in-app overlay. */
+export type Cam = 'system' | 'app';
+/** Longest edge of the stored photo, in pixels. */
+export type PhotoMax = 1280 | 1800 | 2400;
 
 export interface Slot {
 	id: string;
@@ -61,4 +65,10 @@ export interface Cfg {
 	mode: Mode;
 	padSide: PadSide;
 	enabled: EnabledMap;
+	cam: Cam;
+	/** False until the camera has been picked once — the flag that opens the picker. */
+	camChosen: boolean;
+	photoMax: PhotoMax;
+	needPhoto: boolean;
+	allowSkip: boolean;
 }

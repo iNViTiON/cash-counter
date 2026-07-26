@@ -173,3 +173,39 @@ input {
 	border-radius: 12px;
 	padding: 14px;
 }
+
+/* Centred modal, above every overlay but below the toast. */
+.scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 70;
+	background: rgba(8, 8, 10, 0.82);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 18px;
+}
+
+.sheet {
+	width: 100%;
+	background: var(--card);
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	padding: 18px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.sheet-title {
+	font-size: 14px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	color: var(--fg);
+}
+
+.sheet-body {
+	font-size: 12px;
+	color: var(--muted);
+	line-height: 1.55;
+}

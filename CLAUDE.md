@@ -58,8 +58,10 @@ grid is `auto-fill` at 240px and reflows to match.
 **Persistence** is four `localStorage` keys (`src/lib/storage.ts`). Reads are
 defensive and writes return `false` on quota failure, which surfaces as a toast
 — storage never throws into the UI. Photos are downscaled JPEG data URLs stored
-alongside the slot, so the practical ceiling is ~12 photo slots against the 5 MB
-quota.
+alongside the slot. `src/lib/photo.ts` is the one encoder every path uses
+(in-app camera, system camera, file chooser): it fits the longest edge to
+`cfg.photoMax` and steps quality down from 0.88 until the data URL is under
+~1.2 MB, so a photo slot costs at most that against the 5 MB quota.
 
 **Offline is a hard requirement**: every feature must work with no network.
 Nothing may be fetched at runtime. Fonts are self-hosted in `static/fonts/` for
@@ -81,6 +83,15 @@ will not be precached.
 - Amount formatting is pinned to `et-EE` via `LOCALE` in `src/lib/format.ts`.
   The design's visible `EUR · ET-EE` badge and its formatting footnote are
   deliberately not implemented.
+- The two photo file inputs live in `TotalBar.svelte` and are never wrapped in
+  an `{#if}`. A file input only opens when `.click()` runs inside the tap that
+  asked for it, so the whole chain from the PHOTO button — `openCamera` →
+  `openSysCam`, plus `chooseCam` and `takePhoto` — is deliberately synchronous.
+  One `await` in there and the system camera silently stops opening on iOS.
+- The "allow skipping" toggle in settings needs two classes: `on` accents the
+  track only while the requirement above it is on, `knob-on` moves the knob to
+  whatever `allowSkip` actually is. The row is dimmed but never `disabled`,
+  because tapping it while off is what produces the explaining toast.
 - Keypad mode marks the quantity inputs `readonly` and `setMode('pad')` blurs
   the active element — that pair is what keeps the mobile soft keyboard down.
   Losing it makes pad mode unusable on a phone.

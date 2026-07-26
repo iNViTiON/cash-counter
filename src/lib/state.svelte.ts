@@ -1,12 +1,15 @@
 import { CENTS, dmy, money } from './format';
+import { encodePhoto } from './photo';
 import { K, read, remove, write } from './storage';
 import type {
+	Cam,
 	Cfg,
 	MaxAge,
 	Mode,
 	PadKey,
 	PadSide,
 	PadSize,
+	PhotoMax,
 	Qty,
 	Quick,
 	SaveDay,
@@ -25,8 +28,15 @@ export const DEFAULT_CFG: Cfg = {
 	labels: DEFAULT_LABELS,
 	mode: 'pad',
 	padSide: 'right',
-	enabled: {}
+	enabled: {},
+	cam: 'system',
+	camChosen: false,
+	photoMax: 1800,
+	needPhoto: false,
+	allowSkip: true
 };
+
+export const PHOTO_SIZES: PhotoMax[] = [1280, 1800, 2400];
 
 const DAY_MS = 864e5;
 const WS_DEBOUNCE_MS = 260;
@@ -64,11 +74,20 @@ class CashCounter {
 	saveDay = $state<SaveDay>('today');
 	newLabel = $state('');
 	camErr = $state<string | null>(null);
+	/** Live stream size, e.g. `1920×1080`, shown in the camera header. */
+	camRes = $state('');
 	toast = $state('');
 
 	/** DOM handles, filled in by `bind:this`. */
 	inputs = $state<(HTMLInputElement | null)[]>([]);
 	scroller = $state<HTMLElement | null>(null);
+	/**
+	 * The two file inputs, always mounted in the total bar. A file input only
+	 * opens when `.click()` runs inside the tap that asked for it, so they can
+	 * never be created on demand.
+	 */
+	sysCamInput = $state<HTMLInputElement | null>(null);
+	fileInput = $state<HTMLInputElement | null>(null);
 
 	/** True until the first key is pressed on the row the cursor moved to. */
 	freshRow = true;
@@ -93,6 +112,10 @@ class CashCounter {
 	activeCents = $derived(this.live[Math.min(this.active, this.live.length - 1)]);
 	/** Date the count is filed under, which is not necessarily today. */
 	filedOn = $derived(dmy(this.#dayDate(this.saveDay)));
+	/** Stored photo size, clamped to the three offered values. */
+	photoMax = $derived<PhotoMax>(
+		PHOTO_SIZES.includes(this.cfg.photoMax) ? this.cfg.photoMax : 1800
+	);
 
 	#dayDate(day: SaveDay): Date {
 		const d = new Date();
@@ -258,6 +281,24 @@ class CashCounter {
 	/* ---------- slots ---------- */
 
 	commitSave(): void {
+		// Without evidence the count does not reach a slot; the gate offers the
+		// camera, and a confirmed skip if the settings allow one.
+		if (this.cfg.needPhoto && !this.photo) {
+			this.view = 'needphoto';
+			return;
+		}
+		const slot = this.#commit(this.photo);
+		if (slot) this.say(`Saved · ${money(slot.total)}`);
+	}
+
+	/** Only reachable from the gate, and only while `allowSkip` is on. */
+	saveWithoutPhoto(): void {
+		const slot = this.#commit(null);
+		if (slot) this.say(`Saved without photo · ${money(slot.total)}`);
+	}
+
+	/** Files the count under a new slot. Null means storage refused the write. */
+	#commit(photo: string | null): Slot | null {
 		const d = this.#dayDate(this.saveDay);
 		const slot: Slot = {
 			// Not the timestamp: two saves in the same millisecond would collide,
@@ -268,16 +309,16 @@ class CashCounter {
 			ts: Date.now(),
 			total: this.totalCents,
 			qty: $state.snapshot(this.qty),
-			photo: this.photo
+			photo
 		};
 		const next = [slot, ...this.#prune()];
-		if (!this.#write(K.slots, next)) return;
+		if (!this.#write(K.slots, next)) return null;
 		this.slots = next;
 		this.view = null;
 		// The evidence belongs to the slot now — the next count starts without it.
 		this.photo = null;
 		this.saveWorkspace();
-		this.say(`Saved · ${money(slot.total)}`);
+		return slot;
 	}
 
 	loadSlot(): void {
@@ -346,6 +387,87 @@ class CashCounter {
 		this.saveWorkspace();
 	}
 
+	/** Closes whichever camera path produced the shot and keeps it. */
+	attachPhoto(data: string): void {
+		this.camErr = null;
+		this.camRes = '';
+		this.view = null;
+		this.setPhoto(data);
+		this.say('Photo attached');
+	}
+
+	/**
+	 * Routes the PHOTO button, and stays synchronous the whole way: the system
+	 * path ends in `.click()`, which the browser only honours while the tap that
+	 * triggered it is still being handled.
+	 */
+	openCamera(): void {
+		if (!this.cfg.camChosen) {
+			this.view = 'campick';
+			return;
+		}
+		if (this.cfg.cam === 'app') this.view = 'camera';
+		else this.openSysCam();
+	}
+
+	/** Hands off to the phone's own camera app. */
+	openSysCam(): void {
+		const el = this.sysCamInput;
+		if (!el) {
+			// Only reachable if the total bar ever stops being mounted. Said as a
+			// toast rather than in the overlay, which clears its own error on open.
+			this.say('System camera unavailable. Pick a file instead.');
+			return;
+		}
+		// Re-picking the same file fires no change event unless the value is cleared.
+		el.value = '';
+		el.click();
+	}
+
+	pickAnyFile(): void {
+		const el = this.fileInput;
+		if (!el) return;
+		el.value = '';
+		el.click();
+	}
+
+	/** First-run answer: remembered as the default, then opened straight away. */
+	chooseCam(which: Cam): void {
+		this.cfg.cam = which;
+		this.cfg.camChosen = true;
+		this.persistCfg();
+		this.view = null;
+		if (which === 'app') this.view = 'camera';
+		else this.openSysCam();
+	}
+
+	/** The gate's primary action. Dismisses it and shoots; the save is not resumed. */
+	takePhoto(): void {
+		this.view = null;
+		this.openCamera();
+	}
+
+	/** Shared by both file inputs — the system camera returns a file like any other. */
+	pickFile(input: HTMLInputElement): void {
+		const file = input.files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			const img = new Image();
+			img.onload = () => this.attachPhoto(encodePhoto(img, img.width, img.height, this.photoMax));
+			img.onerror = () => this.#photoFailed('That file is not a readable image.');
+			img.src = String(reader.result);
+		};
+		reader.onerror = () => this.#photoFailed('That file could not be read.');
+		reader.readAsDataURL(file);
+	}
+
+	/** The overlay shows its own error; the system-camera path has to be told. */
+	#photoFailed(message: string): void {
+		if (this.view === 'camera') this.camErr = message;
+		else this.say(message);
+	}
+
 	/* ---------- settings ---------- */
 
 	toggleDenom(cents: number): void {
@@ -380,6 +502,30 @@ class CashCounter {
 
 	setPadSize(size: PadSize): void {
 		this.cfg.padSize = size;
+		this.persistCfg();
+	}
+
+	/** Answering here counts as choosing, so the first-run picker stays away. */
+	setCam(cam: Cam): void {
+		this.cfg.cam = cam;
+		this.cfg.camChosen = true;
+		this.persistCfg();
+	}
+
+	toggleNeedPhoto(): void {
+		this.cfg.needPhoto = !this.cfg.needPhoto;
+		this.persistCfg();
+	}
+
+	toggleAllowSkip(): void {
+		// The row stays tappable while dimmed so it can say why it does nothing.
+		if (!this.cfg.needPhoto) return this.say('Turn on “Require photo evidence” first');
+		this.cfg.allowSkip = !this.cfg.allowSkip;
+		this.persistCfg();
+	}
+
+	setPhotoMax(max: PhotoMax): void {
+		this.cfg.photoMax = max;
 		this.persistCfg();
 	}
 
