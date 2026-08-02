@@ -140,6 +140,23 @@ will not be precached.
 - Shared CSS lives in `src/app.css`. `.head`, `.wide`, `.name` and the `.seg`
   sizing are scoped (`.card .head`, `.setting .name`) because Camera, Keypad,
   SlotDetail, SlotStrip, TotalBar and TopBar already own those names.
+- **The PIN gate is `app.gate`, not an `app.view` value.** `view` is a single
+  scalar, so `view = 'pin'` would unmount the Settings screen being gated and
+  collapse `padOpen`. The sheet uses the global `.scrim` (z70) over Settings'
+  `.screen` (z60); neither `.app` nor `.mid` makes a stacking context, so it
+  composes. Keypad stays mounted behind it and the scrim eats the taps — which
+  is why PinGate's key grid is `.pin-grid`, not `.grid`.
+- Gating lives in state methods, not call sites: the public method is the guard
+  and a private one does the work, the same shape as `commitSave()` → `#commit()`.
+  `#closeGate()` is the only exit — a surviving `#pending` would make the *next*
+  unlock run an action nobody asked for. Any success toast belongs **inside** the
+  job, since a gated method returns before the user has typed anything.
+- Unlock is a sliding five-minute window, and `#allow()` compares `Date.now()`
+  rather than trusting the timer: a backgrounded PWA can freeze timers and fire
+  them late, which would otherwise extend the window past its real expiry.
+- The PIN is plaintext in `ec.lock` by decision — a mis-tap guard, not security.
+  Setup says so in as many words; do not quietly "upgrade" it to a hash and
+  imply protection it does not provide.
 
 ## Design source
 

@@ -18,6 +18,10 @@ import type { EncodedPhoto } from './photo';
 import type {
 	Cam,
 	Cfg,
+	Gate,
+	GateKind,
+	GateStep,
+	Lock,
 	MaxAge,
 	Mode,
 	PadKey,
@@ -57,6 +61,12 @@ export const PHOTO_SIZES: PhotoMax[] = [1280, 1800, 2400];
 const DAY_MS = 864e5;
 const WS_DEBOUNCE_MS = 260;
 const TOAST_MS = 2200;
+/** How long one unlock lasts. Slides forward on every gated action. */
+const UNLOCK_MS = 3e5;
+export const PIN_MIN = 4;
+export const PIN_MAX = 8;
+/** Wrong tries before the sheet offers the only real recovery path. */
+const PIN_HINT_AFTER = 3;
 
 const freshCfg = (): Cfg => ({ ...DEFAULT_CFG, labels: [...DEFAULT_LABELS], enabled: {} });
 
@@ -90,6 +100,22 @@ class CashCounter {
 	usage = $state<StorageInfo | null>(null);
 	/** Set when this browser refuses IndexedDB outright; counting still works. */
 	storageErr = $state<string | null>(null);
+
+	/* ---------- lock ---------- */
+	lock = $state<Lock>({ pin: '' });
+	/** Session only, so a reload always re-locks. */
+	gate = $state<Gate | null>(null);
+	pinEntry = $state('');
+	pinErr = $state('');
+	/** Epoch ms the unlock window closes. Zero means locked. */
+	unlockedUntil = $state(0);
+	pinTries = $state(0);
+
+	/** The job the gate is holding. Not `$state`: a closure in a deep proxy is a trap. */
+	#pending: (() => void | Promise<void>) | null = null;
+	/** First entry of a new PIN, held while the second is typed. */
+	#draft = '';
+	#lockTimer: ReturnType<typeof setTimeout> | undefined;
 
 	mode = $state<Mode>('pad');
 	padSide = $state<PadSide>('right');
@@ -149,6 +175,9 @@ class CashCounter {
 	photoMax = $derived<PhotoMax>(
 		PHOTO_SIZES.includes(this.cfg.photoMax) ? this.cfg.photoMax : 1800
 	);
+	pinSet = $derived(this.lock.pin.length > 0);
+	/** For the badge only — `#allow()` re-reads the wall clock regardless. */
+	unlocked = $derived(this.unlockedUntil > 0);
 
 	#dayDate(day: SaveDay): Date {
 		const d = new Date();
@@ -177,6 +206,11 @@ class CashCounter {
 		this.qty = cfg.autoSave && ws?.qty ? ws.qty : {};
 		this.photo = (cfg.autoSave && ws?.photo) || null;
 		this.saveLabel = cfg.labels[0];
+
+		// Digits only and clamped: a hand-edited key must not leave a PIN the pad
+		// cannot type, which would lock the user out of their own slots.
+		const lock = read<Partial<Lock> | null>(K.lock, null);
+		this.lock = { pin: String(lock?.pin ?? '').replace(/\D/g, '').slice(0, PIN_MAX) };
 	}
 
 	/**
@@ -221,6 +255,8 @@ class CashCounter {
 		clearTimeout(this.#wsTimer);
 		this.saveWorkspace();
 		clearTimeout(this.#toastTimer);
+		clearTimeout(this.#lockTimer);
+		this.unlockedUntil = 0;
 	}
 
 	/* ---------- persistence ---------- */
@@ -296,6 +332,161 @@ class CashCounter {
 		this.say('Still loading…');
 		return true;
 	}
+
+	/* ---------- lock ---------- */
+
+	persistLock(): void {
+		this.#write(K.lock, $state.snapshot(this.lock));
+	}
+
+	/**
+	 * Runs `job` now when no PIN is set or the window is open; otherwise raises
+	 * the sheet and holds it. Same shape as `commitSave()` → `#commit()`: the
+	 * public method checks a policy and opens an overlay, the private one works.
+	 *
+	 * `job` may be async, and any success toast belongs *inside* it — a gated
+	 * method returns long before the user has finished typing.
+	 */
+	#allow(why: string, job: () => void | Promise<void>): void {
+		if (!this.pinSet) {
+			void job();
+			return;
+		}
+		if (Date.now() < this.unlockedUntil) {
+			this.#extend();
+			void job();
+			return;
+		}
+		this.#pending = job;
+		this.#draft = '';
+		this.pinEntry = '';
+		this.pinErr = '';
+		this.pinTries = 0;
+		this.gate = { kind: 'unlock', why, step: 'verify' };
+	}
+
+	/**
+	 * The single exit from the sheet — cancel, success and abandonment all come
+	 * through here. A surviving `#pending` would make the *next* unlock run an
+	 * action the user never asked for, so nothing may null `gate` directly.
+	 */
+	#closeGate(): void {
+		this.gate = null;
+		this.#pending = null;
+		this.#draft = '';
+		this.pinEntry = '';
+		this.pinErr = '';
+		this.pinTries = 0;
+	}
+
+	/**
+	 * Opens the window and reschedules the close. The timer only keeps the badge
+	 * honest; a backgrounded PWA can have its timers frozen and fire them late,
+	 * which is why `#allow()` compares the wall clock instead of trusting this.
+	 */
+	#extend(): void {
+		this.unlockedUntil = Date.now() + UNLOCK_MS;
+		clearTimeout(this.#lockTimer);
+		this.#lockTimer = setTimeout(() => (this.unlockedUntil = 0), UNLOCK_MS);
+	}
+
+	lockNow(): void {
+		this.unlockedUntil = 0;
+		clearTimeout(this.#lockTimer);
+		this.say('Locked');
+	}
+
+	#openGate(kind: GateKind, why: string, step: GateStep): void {
+		this.#closeGate();
+		this.gate = { kind, why, step };
+	}
+
+	/** The switch reflects `pinSet`, so cancelling leaves it correctly un-flipped. */
+	togglePin(): void {
+		if (!this.pinSet) return this.#openGate('set', 'Set an admin PIN', 'new');
+		this.#openGate('clear', 'Remove the admin PIN', 'verify');
+	}
+
+	changePin(): void {
+		if (!this.pinSet) return this.say('No PIN set yet');
+		this.#openGate('change', 'Change the admin PIN', 'verify');
+	}
+
+	pinKey(d: string): void {
+		if (this.pinEntry.length >= PIN_MAX) return;
+		this.pinEntry += d;
+		this.pinErr = '';
+	}
+
+	pinDel(): void {
+		this.pinEntry = this.pinEntry.slice(0, -1);
+		this.pinErr = '';
+	}
+
+	pinCancel(): void {
+		this.#closeGate();
+	}
+
+	pinSubmit(): void {
+		const g = this.gate;
+		if (!g) return;
+		const entry = this.pinEntry;
+
+		if (g.step === 'verify') {
+			if (entry !== this.lock.pin) {
+				this.pinEntry = '';
+				this.pinTries += 1;
+				this.pinErr = 'Wrong PIN';
+				return;
+			}
+			if (g.kind === 'unlock') {
+				const job = this.#pending;
+				this.#extend();
+				this.#closeGate();
+				void job?.();
+				return;
+			}
+			if (g.kind === 'clear') {
+				this.lock = { pin: '' };
+				this.persistLock();
+				this.unlockedUntil = 0;
+				this.#closeGate();
+				this.say('PIN removed');
+				return;
+			}
+			// change: verified the old one, now take the new one
+			this.pinEntry = '';
+			this.gate = { ...g, step: 'new' };
+			return;
+		}
+
+		if (g.step === 'new') {
+			if (entry.length < PIN_MIN) {
+				this.pinErr = `At least ${PIN_MIN} digits`;
+				return;
+			}
+			this.#draft = entry;
+			this.pinEntry = '';
+			this.gate = { ...g, step: 'confirm' };
+			return;
+		}
+
+		if (entry !== this.#draft) {
+			this.#draft = '';
+			this.pinEntry = '';
+			this.pinErr = 'Those did not match';
+			this.gate = { ...g, step: 'new' };
+			return;
+		}
+		this.lock = { pin: entry };
+		this.persistLock();
+		this.#extend();
+		this.#closeGate();
+		this.say('PIN set');
+	}
+
+	/** True once the sheet should stop pretending a retry is the way out. */
+	pinStuck = $derived(this.pinTries >= PIN_HINT_AFTER);
 
 	/* ---------- counting ---------- */
 
@@ -458,25 +649,37 @@ class CashCounter {
 		this.say('Counts loaded');
 	}
 
-	async deleteSlot(): Promise<void> {
+	deleteSlot(): void {
+		// Captured now: `openSlot` follows `openId`, which the dialog clears below.
 		const id = this.openId;
+		if (this.#notReady()) return;
 		this.view = null;
 		this.openId = null;
-		if (await this.removeSlot(id)) this.say('Slot deleted');
+		this.#allow('Delete this slot', async () => {
+			if (await this.#removeSlot(id)) this.say('Slot deleted');
+		});
 	}
 
-	async removeSlot(id: string | null): Promise<boolean> {
-		if (this.#notReady() || !id) return false;
+	/** The settings list's ✕. Goes through `#removeSlot` so it gates exactly once. */
+	removeSlot(id: string | null): void {
+		if (this.#notReady() || !id) return;
+		this.#allow('Delete this slot', () => void this.#removeSlot(id));
+	}
+
+	async #removeSlot(id: string | null): Promise<boolean> {
+		if (!id) return false;
 		if (!(await this.#save(() => dropSlots([id])))) return false;
 		this.slots = this.slots.filter((s) => s.id !== id);
 		return true;
 	}
 
-	async dropAllSlots(): Promise<void> {
+	dropAllSlots(): void {
 		if (this.#notReady()) return;
-		if (!(await this.#save(dropAll))) return;
-		this.slots = [];
-		this.say('All slots deleted');
+		this.#allow('Delete every saved slot', async () => {
+			if (!(await this.#save(dropAll))) return;
+			this.slots = [];
+			this.say('All slots deleted');
+		});
 	}
 
 	async quickSave(): Promise<void> {
@@ -501,11 +704,13 @@ class CashCounter {
 		this.say('Quick loaded');
 	}
 
-	async dropQuick(): Promise<void> {
+	dropQuick(): void {
 		if (this.#notReady()) return;
-		if (!(await this.#save(() => saveQuick(null)))) return;
-		this.quick = null;
-		this.say('Quick slot cleared');
+		this.#allow('Clear the quick slot', async () => {
+			if (!(await this.#save(() => saveQuick(null)))) return;
+			this.quick = null;
+			this.say('Quick slot cleared');
+		});
 	}
 
 	/**
@@ -644,6 +849,13 @@ class CashCounter {
 	}
 
 	setMaxAge(days: MaxAge): void {
+		// Only shortening destroys anything. Written as a comparison rather than
+		// `days === 7` so it stays correct if the choices ever change.
+		if (days >= this.cfg.maxAge) return this.#setMaxAge(days);
+		this.#allow(`Shorten retention to ${days} days`, () => this.#setMaxAge(days));
+	}
+
+	#setMaxAge(days: MaxAge): void {
 		this.cfg.maxAge = days;
 		this.persistCfg();
 	}
@@ -660,16 +872,22 @@ class CashCounter {
 		this.persistCfg();
 	}
 
+	/** Turning this off removes the evidence requirement outright, so it is gated. */
 	toggleNeedPhoto(): void {
-		this.cfg.needPhoto = !this.cfg.needPhoto;
-		this.persistCfg();
+		this.#allow('Change the photo requirement', () => {
+			this.cfg.needPhoto = !this.cfg.needPhoto;
+			this.persistCfg();
+		});
 	}
 
 	toggleAllowSkip(): void {
 		// The row stays tappable while dimmed so it can say why it does nothing.
+		// This check comes first, so tapping a dimmed row never asks for a PIN.
 		if (!this.cfg.needPhoto) return this.say('Turn on “Require photo evidence” first');
-		this.cfg.allowSkip = !this.cfg.allowSkip;
-		this.persistCfg();
+		this.#allow('Change the photo-skip policy', () => {
+			this.cfg.allowSkip = !this.cfg.allowSkip;
+			this.persistCfg();
+		});
 	}
 
 	setPhotoMax(max: PhotoMax): void {

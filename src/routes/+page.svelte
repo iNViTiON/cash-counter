@@ -5,6 +5,7 @@
 	import DenomList from '$lib/components/DenomList.svelte';
 	import Keypad from '$lib/components/Keypad.svelte';
 	import PhotoRequired from '$lib/components/PhotoRequired.svelte';
+	import PinGate from '$lib/components/PinGate.svelte';
 	import SaveBar from '$lib/components/SaveBar.svelte';
 	import Settings from '$lib/components/Settings.svelte';
 	import SlotDetail from '$lib/components/SlotDetail.svelte';
@@ -142,6 +143,10 @@
 	{#if app.view === 'needphoto'}
 		<PhotoRequired />
 	{/if}
+
+	<!-- Not an `app.view` case: the gate has to paint *over* Settings, and `view`
+	     is a single scalar that would unmount it. `.scrim` is z70 to its z60. -->
+	<PinGate />
 
 	<Toast />
 </div>

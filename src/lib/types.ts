@@ -60,6 +60,34 @@ export interface Slot {
 	updatedAt: number;
 }
 
+/**
+ * The admin PIN. Plaintext by decision: this is a mis-tap guard, not a security
+ * control — anyone who can open devtools reads it in seconds, and the setup
+ * screen says so. An empty string means no PIN is set and every gate is a
+ * pass-through; there is deliberately no separate `enabled` flag, because a
+ * retained-but-disabled PIN reads as off while the secret is still on disk.
+ */
+export interface Lock {
+	pin: string;
+}
+
+export type GateKind = 'unlock' | 'set' | 'change' | 'clear';
+export type GateStep = 'verify' | 'new' | 'confirm';
+
+/**
+ * Descriptor for the PIN sheet. Deliberately not a `View`: `view` is a single
+ * scalar, so `view = 'pin'` would unmount Settings — the screen whose controls
+ * need gating — and collapse `padOpen`. The global `.scrim` is z70 against
+ * Settings' z60 and neither `.app` nor `.mid` makes a stacking context, so a
+ * separate field paints over it for free.
+ */
+export interface Gate {
+	kind: GateKind;
+	/** Sentence naming what is about to happen: "Delete every saved slot". */
+	why: string;
+	step: GateStep;
+}
+
 /** Record-shape version and one-time migration state, stored in `kv` under `meta`. */
 export interface StoredMeta {
 	version: number;

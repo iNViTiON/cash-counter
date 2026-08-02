@@ -2,6 +2,7 @@
 	import { bytes, CENTS, denomLabel, dmy, hm, money } from '$lib/format';
 	import { app } from '$lib/state.svelte';
 	import type { PadSize, PhotoMax } from '$lib/types';
+	import SettingsPin from './SettingsPin.svelte';
 
 	const PAD_SIZES: Array<[string, PadSize]> = [
 		['S', 25],
@@ -275,6 +276,8 @@
 					<button type="button" class="btn field-btn" onclick={() => app.addLabel()}>ADD</button>
 				</div>
 			</section>
+
+			<SettingsPin />
 
 			<section class="card">
 				<div class="head">

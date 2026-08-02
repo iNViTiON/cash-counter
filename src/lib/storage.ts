@@ -9,7 +9,14 @@
 
 export const K = {
 	ws: 'ec.ws',
-	cfg: 'ec.cfg'
+	cfg: 'ec.cfg',
+	/**
+	 * Its own key rather than a field on `cfg`: whether a PIN exists has to be
+	 * known before the first paint (so it cannot be async), and `persistCfg()`
+	 * fires from a dozen unrelated places — a wholesale `cfg` rewrite must never
+	 * be able to clobber or resurrect the PIN.
+	 */
+	lock: 'ec.lock'
 } as const;
 
 /** Read once by `migrate.ts`, then removed. Nothing else may touch these. */
