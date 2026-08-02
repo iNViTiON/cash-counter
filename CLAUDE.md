@@ -125,11 +125,35 @@ where it would paint over the "Saved · …" the user needs to see. Only a run t
 user asked for passes `loud`. The failure still lands in `status`/`lastError`,
 which the settings card renders.
 
-**The cloud viewer is a screen, not a mode.** The archive gains a profile
-picker; pointing it at another machine's bucket changes what that screen lists
-and nothing else. The app keeps counting and saving normally — there is no
-whole-app read-only state, no dimming and no viewer bar, because viewing another
-till's records is not a reason to stop working.
+**The slot strip is the archive.** There is no archive screen and no `archive`
+value in `View` — the strip shows this device's slots merged with its bucket,
+or another machine's bucket when a profile is picked from the `▣ THIS DEVICE`
+button beside it. `SHOW ALL` opens the same rows without the six-chip cap.
+
+`app.rows` is the single row model behind the strip, the sheet and the detail.
+Its fall-through is load-bearing: `viewer.active ? remote : link ? link.merged
+: slots`, so **cloud configured but unreachable still yields every local slot**.
+An offline launch paints the real list instead of an empty or spinning strip,
+and a failed remote listing degrades to an inline note beside whatever is
+already there. Never blank a populated rail — on a till an empty list reads as
+data loss.
+
+**Viewing another machine blocks the commit.** This reverses the earlier "a
+screen, not a mode" decision, and the merge is what reversed it: with one list
+on screen, a save made while browsing another till lands in a list nobody can
+see, so refusing beats filing a count into thin air. `commitSave`,
+`saveWithoutPhoto` and `quickSave` all return `blockSave()`, which names the
+machine and how to leave. Counting, CLEAR and PHOTO are untouched — this is a
+save block, not a read-only app. The SAVE button is greyed but **never
+`disabled`**, and the save bar's lid is a transparent div rather than
+`disabled` controls, because a silent tap is the wrong answer to a reasonable
+thing to try.
+
+A consequence worth knowing: `cloudCfg.defaultProfile` may name a remote, and
+the first-run sheet offers exactly that, so **the app can launch into a state
+where SAVE is dead**. `AskProfile` says so where the choice is made. The two
+fields live on `CloudCfg`, not `Cfg`, so a device that never touched the cloud
+keeps a byte-identical settings blob.
 
 - **Remote data lives in `viewer.svelte.ts` and only there.** It never reaches
   `app.slots`, so `#prune()` — which runs on save/load against the *local*
@@ -150,6 +174,13 @@ till's records is not a reason to stop working.
 - `ec.cloud.key` is this device's read-write pair for its own bucket;
   `ec.remotes` holds read-only keys for other machines'. The viewer path never
   reads the former and the sync path never reads the latter.
+- **A device cannot mint a read-only string from its own credentials.** It holds
+  exactly one key — the read-write one it backs up with — so re-labelling that
+  `viewer` would be a lie the receiving app cannot detect. `BUILD A STRING`
+  (`encodeFor` in `cloudshare.ts`) wraps a key *you paste* around this device's
+  endpoint, bucket, region and prefix. `kind` is a label for the receiving app,
+  not a restriction; scope lives in the bucket policy and nothing here can check
+  it.
 
 **Offline is a hard requirement** for counting and saving: those must work with
 no network, and sync is strictly additive on top. Sync never blocks a save. The
@@ -227,6 +258,18 @@ will not be precached.
   control routes through `edit()`, which hands the job to `app.guard` so one
   prompt both unlocks and runs the tap that triggered it. Gating each control
   separately made every button need pressing twice.
+- Following from that: **never write `if (locked) return unlock();` in front of
+  `app.guard(why, job)`.** `guard` already covers both states, and the extra
+  branch hands the gate an *empty* job — so unlocking swallows the tap and the
+  button needs pressing twice. This has been reintroduced once. `locked` is for
+  rendering (`class:dim`, the LOCKED banner, `readonly` fields) and nothing else.
+- The PIN card's copy must describe what `#allow()` actually guards. It is the
+  only description of the policy anyone sees, so a shorter sentence that reads
+  better but omits half the gated operations is a bug, not a style choice.
+- PinGate takes **4–8 digits with an explicit OK**, and its dots are slots that
+  grow past the minimum. A fixed four with auto-submit — which is what the design
+  mocks up — would make an existing 5–8 digit PIN unenterable on a device that
+  already has one.
 - The credentials are the crown jewels, not the slots: they grant every photo in
   the bucket and repointing the endpoint silently redirects future backups. That
   is why reveal, edit, share and import are all gated while the keypad layout and
@@ -257,6 +300,21 @@ previous copy — the file is one long generated document and a positional diff 
 mostly noise. `<sc-if>` / `<sc-for>` / `hint-placeholder-*` are the design tool's
 runtime, not app semantics; translate them to `{#if}` / `{#each}` and drop the
 hints.
+
+**The template is truth; the `<script>` block is a mockup.** Markup, copy,
+colours and state names in `<x-dc>` are authoritative. The script under it is a
+localStorage-and-`setTimeout` fake of an app that predates IndexedDB, cloud sync
+and the PIN — porting its logic would tear all three out. It writes slots to
+`localStorage`, prunes without returning the `gone` ids that own photo blobs,
+mints slot ids from `Date.now()`, fakes the connection probe with a timer, and
+seeds mock buckets. Read it for *intent*, never copy it.
+
+The corollary: **a design omission is not a deletion instruction.** The mockup
+has no STORAGE card and no persistence claim because a mockup cannot have one.
+Anything the design leaves out because it is not a real app, keep. Anything it
+leaves out that weakens a guarantee — the narrower PIN gating, the fixed
+four-digit entry — is a mockup artefact too; keep the guarantee and reword the
+copy to match.
 
 ## Deployment
 
