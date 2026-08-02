@@ -1,3 +1,28 @@
-# Cloudflare Pages serves matching static assets first; anything left over is
-# rewritten onto the SPA shell so client-side routes survive a hard reload.
-/*  /index.html  200
+# Deliberately empty of a catch-all. Read this before adding one back.
+#
+# `/*  /index.html  200` was here to keep client-side routes alive across a hard
+# reload. There are no client-side routes — `src/routes/+page.svelte` is the only
+# one and it prerenders to `/index.html` — so it bought nothing, and it cost an
+# outage:
+#
+#   1. During a deploy a browser asked for a hashed chunk before it had
+#      propagated to that edge node.
+#   2. No asset matched, so this rule answered with the SPA shell at status 200.
+#   3. `_headers` marks `/_app/immutable/*` as `max-age=31536000, immutable`, so
+#      Cloudflare cached that HTML **under the JavaScript URL, for a year**.
+#   4. Every later request for the real chunk got HTML. `import()` rejects, and
+#      the app dies with SvelteKit's opaque "500 Internal Error".
+#
+# Observed in production as `content-type: text/html` with `cf-cache-status: HIT`
+# on a .js URL. Appending a query string returned the correct JavaScript, which
+# is what proved it was the cache entry rather than the file.
+#
+# Cloudflare Pages `_redirects` supports 200 rewrites and 3xx redirects but NOT
+# 404, so there is no way to keep a catch-all that fails safely for assets. With
+# no rule, a missing asset gets a real 404: `import()` still fails, but it fails
+# cleanly and nothing cacheable is ever served in its place.
+#
+# The trade-off, stated: a deep link to any path other than `/` now returns
+# Cloudflare's 404 instead of loading the app. That is correct for a single-route
+# app whose PWA `start_url` is `/`. If real routes are ever added, scope the
+# rewrite to those paths explicitly — never `/*`, or this comes straight back.

@@ -270,5 +270,18 @@ on `main`, live at `cash.invition.dev`.
   explicit `bun install` in the build command
 
 `static/_headers` sets the cache policy (immutable bundles and fonts,
-never-cached shell/service worker) and `static/_redirects` rewrites unknown
-paths onto the SPA shell. Both are plain files copied into `build/`.
+never-cached shell/service worker). Both it and `static/_redirects` are plain
+files copied into `build/`.
+
+**`_redirects` has no catch-all, on purpose.** `/*  /index.html  200` combined
+with the immutable header on `/_app/immutable/*` caused a production outage: a
+chunk requested mid-deploy, before it had propagated, was answered with the SPA
+shell at status 200, and Cloudflare then cached that HTML under the JavaScript
+URL for a year. Every later request got HTML, `import()` rejected, and the app
+showed SvelteKit's opaque "500 Internal Error". Pages `_redirects` cannot express
+a 404, so a catch-all cannot be made to fail safely for assets — the file
+explains this at length. If real routes are ever added, scope the rewrite to
+them explicitly and never use `/*`.
+
+Recovering from a poisoned entry needs a Cloudflare **cache purge**; redeploying
+does not clear it, because the asset URL and its cache key are unchanged.
