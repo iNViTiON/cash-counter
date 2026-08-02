@@ -11,6 +11,15 @@
 	let secretAccessKey = $state('');
 	let showSecret = $state(false);
 
+	/** Revealing the key is gated; hiding it again is not. */
+	function toggleSecret(): void {
+		if (showSecret) {
+			showSecret = false;
+			return;
+		}
+		app.revealSecret('Show this profile’s secret access key', () => (showSecret = true));
+	}
+
 	const complete = $derived(
 		Boolean(name.trim() && endpoint.trim() && bucket.trim() && accessKeyId && secretAccessKey)
 	);
@@ -93,7 +102,7 @@
 			<label class="f"><span>Secret access key</span>
 				<span class="secret">
 					<input class="field" type={showSecret ? 'text' : 'password'} bind:value={secretAccessKey} />
-					<button type="button" class="btn field-btn" onclick={() => (showSecret = !showSecret)}>
+					<button type="button" class="btn field-btn" onclick={toggleSecret}>
 						{showSecret ? 'HIDE' : 'SHOW'}
 					</button>
 				</span></label>

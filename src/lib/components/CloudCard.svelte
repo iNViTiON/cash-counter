@@ -75,6 +75,15 @@
 		(link?.pending ?? []).reduce((n, s) => n + (s.photo?.bytes ?? 0) + 400, 0)
 	);
 
+	/** Revealing the key is gated; hiding it again is not. */
+	function toggleSecret(): void {
+		if (showSecret) {
+			showSecret = false;
+			return;
+		}
+		app.revealSecret('Show the secret access key', () => (showSecret = true));
+	}
+
 	async function copyCors(): Promise<void> {
 		try {
 			await navigator.clipboard.writeText(CORS);
@@ -165,7 +174,7 @@
 			<span class="secret">
 				<input class="field" type={showSecret ? 'text' : 'password'} bind:value={secretAccessKey}
 					onchange={applyFields} />
-				<button type="button" class="btn field-btn" onclick={() => (showSecret = !showSecret)}>
+				<button type="button" class="btn field-btn" onclick={toggleSecret}>
 					{showSecret ? 'HIDE' : 'SHOW'}
 				</button>
 			</span></label>

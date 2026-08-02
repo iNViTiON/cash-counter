@@ -542,6 +542,19 @@ class CashCounter {
 		this.#lockTimer = setTimeout(() => (this.unlockedUntil = 0), UNLOCK_MS);
 	}
 
+	/**
+	 * Gated reveal of a stored credential. Hiding again is never gated — only
+	 * turning a secret back into readable text is.
+	 *
+	 * Worth stating why this matters more than the delete gates: a PIN that stops
+	 * someone deleting one slot but lets them read the bucket key off the screen
+	 * has protected the cheap thing and left the expensive one open, since that
+	 * key grants every photo in the bucket.
+	 */
+	revealSecret(why: string, job: () => void): void {
+		this.#allow(why, job);
+	}
+
 	lockNow(): void {
 		this.unlockedUntil = 0;
 		clearTimeout(this.#lockTimer);

@@ -7,14 +7,27 @@
 /fonts/*
   Cache-Control: public, max-age=31536000, immutable
 
-# A bare `no-cache` here is silently ignored by the edge — every non-.js rule in
-# this file applies, both root-level .js rules did not. Spelled out as an
-# explicit max-age instead, which is the form Pages already serves on `/`.
-# If these still come back as `max-age=14400`, the override is a zone-level
-# Cache Rule rather than anything in this file.
+# These two do not take effect, and the cause is NOT this file — do not spend
+# time rewriting them again. Measured on the deployed site:
 #
-# Either way it is cosmetic: `updateViaCache` defaults to `imports`, so browsers
-# bypass the HTTP cache for sw.js itself, and workbox-*.js is content-hashed.
+#   path                         cf-cache-status   served max-age
+#   /sw.js                       EXPIRED           14400   <- ours ignored
+#   /workbox-*.js                REVALIDATED       14400   <- ours ignored
+#   /_app/immutable/*            HIT               31536000
+#   /fonts/*                     HIT               31536000
+#   /manifest.webmanifest        DYNAMIC           no-cache (ours, honoured)
+#   /robots.txt                  REVALIDATED       14400   (no rule at all)
+#
+# Everything edge-cached with a *short* origin TTL comes back as 14400; anything
+# DYNAMIC keeps our header, and long TTLs survive. That is the zone's Browser
+# Cache TTL (4h) raising short values, so the lever is Cloudflare's dashboard —
+# Caching > Configuration > Browser Cache TTL > "Respect Existing Headers" —
+# not `_headers`. The `public` and `must-revalidate` below DO come through,
+# which is what pinned the cause to max-age alone.
+#
+# Left as-is because it is cosmetic: `updateViaCache` defaults to `imports`, so
+# browsers already bypass the HTTP cache for sw.js itself, and workbox-*.js is
+# content-hashed, so caching it for 4h is correct rather than merely harmless.
 /sw.js
   Cache-Control: public, max-age=0, must-revalidate
 
