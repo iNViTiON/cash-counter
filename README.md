@@ -71,6 +71,12 @@ src/lib/store.ts           slots, photos and the quick slot on top of db.ts
 src/lib/migrate.ts         one-time move of the old localStorage records into IndexedDB
 src/lib/photo.ts           the one JPEG encoder every capture path uses
 src/lib/bloburl.svelte.ts  object URL that revokes itself when the blob goes away
+src/lib/sigv4.ts           AWS SigV4 presigner on WebCrypto (see `bun run check:sigv4`)
+src/lib/s3.ts              PUT/GET/HEAD/DELETE/ListObjectsV2 over presigned URLs
+src/lib/cloudcfg.ts        cloud settings, credentials, and the object-key layout
+src/lib/cloud.svelte.ts    backup engine — upload queue, retention, orphan GC
+src/lib/remote.ts          read-only access to another machine's bucket
+src/lib/viewer.svelte.ts   viewer profiles and the remote archive listing
 src/lib/state.svelte.ts    the whole app state as one runes class, exported as `app`
 src/lib/components/        TopBar, DenomList, Keypad, SaveBar, TotalBar,
                            SlotStrip, SlotDetail, Camera, Settings, Toast
@@ -128,3 +134,23 @@ and using the quick slot — all after `fetch()` to the origin started throwing.
   button; adding the app to the home screen is what usually flips it.
 - **Retention**: slots older than the configured 7 or 31 days are pruned on the
   next save or load, not on a timer.
+- **Cloud backup is optional and bring-your-own.** There is no server: the
+  browser signs SigV4 itself and talks to a bucket you own (Cloudflare R2 by
+  default, but any S3-compatible endpoint works). With nothing configured the app
+  loads no cloud code at all. Settings carries a five-step setup guide and
+  generates the CORS policy you need to paste on your bucket.
+  - Deleting a slot here removes the **local** copy only. Cloud objects go when
+    the separate cloud retention window passes, which is what makes this a backup
+    rather than a mirror. That window only runs while a writer device has the app
+    open — an R2 bucket lifecycle rule is the belt-and-braces version.
+  - Credentials are stored on the device in plain text. **Scope the token to
+    Object Read & Write on a single bucket**, never account-wide: anything that
+    can read this browser's storage can read them, and no browser storage
+    prevents that.
+- **Cloud viewer** profiles let you browse another machine's bucket read-only
+  from the archive screen. Give them an **Object Read only** token. Handing
+  someone a profile hands them that bucket's data until you rotate the token —
+  the PIN check gates this app's screen, not the bucket.
+- **Admin PIN** sits in front of deleting slots, shortening retention, and the
+  cloud and viewer settings. It is stored in plain text and is a guard against a
+  wrong tap, not a security control; the setup screen says so.
