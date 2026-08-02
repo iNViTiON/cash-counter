@@ -4,7 +4,9 @@
 	import CameraPick from '$lib/components/CameraPick.svelte';
 	import DenomList from '$lib/components/DenomList.svelte';
 	import Keypad from '$lib/components/Keypad.svelte';
+	import Archive from '$lib/components/Archive.svelte';
 	import PhotoRequired from '$lib/components/PhotoRequired.svelte';
+	import PinGate from '$lib/components/PinGate.svelte';
 	import SaveBar from '$lib/components/SaveBar.svelte';
 	import Settings from '$lib/components/Settings.svelte';
 	import SlotDetail from '$lib/components/SlotDetail.svelte';
@@ -55,8 +57,60 @@
 		}
 	}
 
+	/**
+	 * The archive detail. A cloud-only row has no local `Slot`, so one is built
+	 * from the cached index — it is display data only and never reaches storage.
+	 */
+	const archRow = $derived(
+		app.viewer?.active
+			? (app.viewer.entries
+					.filter((e) => e.id === app.openId)
+					.map((e) => ({
+						id: e.id,
+						ts: e.ts,
+						label: e.label ?? '',
+						date: e.date ?? '',
+						total: e.total ?? 0,
+						where: 'cloud' as const,
+						local: null,
+						cloud: e
+					}))[0] ?? null)
+			: (app.link?.merged.find((r) => r.id === app.openId) ?? null)
+	);
+	const archSlot = $derived(
+		archRow
+			? (archRow.local ?? {
+					id: archRow.id,
+					label: archRow.label,
+					date: archRow.date,
+					ts: archRow.ts,
+					total: archRow.total,
+					qty: archRow.cloud?.qty ?? {},
+					photo: archRow.cloud?.photoKey ? { bytes: 0, w: 0, h: 0 } : null,
+					updatedAt: archRow.ts
+				})
+			: null
+	);
+	/**
+	 * Evidence for an archive row. A remote profile serves from its own cached
+	 * object URLs, keyed by profile so one machine's photo can never surface
+	 * under another's slot.
+	 */
+	const cloudPhoto = async (): Promise<Blob | null> => {
+		const entry = archRow?.cloud;
+		if (!entry) return null;
+		if (app.viewer?.active) {
+			const url = await app.viewer.photoUrl(entry);
+			return url ? fetch(url).then((r) => r.blob()) : null;
+		}
+		return (await app.link?.cloudPhoto(entry)) ?? null;
+	};
+
 	onMount(() => {
 		app.hydrate();
+		// Deliberately not awaited: an async `onMount` callback has its teardown
+		// discarded, which would leak every listener registered below.
+		void app.load();
 
 		const mq = window.matchMedia('(min-aspect-ratio: 1/1) and (min-width: 620px)');
 		// Read the query on every trigger rather than trusting `change` alone —
@@ -75,10 +129,18 @@
 		// another one once the browser has actually painted.
 		requestAnimationFrame(sync);
 
+		// A phone can kill a backgrounded tab without ever running the teardown,
+		// so the working count is written out the moment the page is hidden.
+		const flush = () => {
+			if (document.visibilityState === 'hidden') app.saveWorkspace();
+		};
+		document.addEventListener('visibilitychange', flush);
+
 		return () => {
 			mq.removeEventListener('change', sync);
 			ro.disconnect();
 			window.removeEventListener('resize', sync);
+			document.removeEventListener('visibilitychange', flush);
 			app.dispose();
 		};
 	});
@@ -113,6 +175,18 @@
 			<SlotDetail />
 		{/if}
 
+		<!-- Inside `.mid`, not in the full-screen Archive shell: SlotDetail's photo
+		     placement measures against midW/midH and its overlay is absolute
+		     against `.mid`. A fixed shell would size it against the wrong box. -->
+		{#if app.view === 'archslot' && archRow}
+			<SlotDetail
+				slot={archSlot}
+				where={archRow.where}
+				readonly={!archRow.local}
+				photoSrc={archRow.local ? null : cloudPhoto}
+			/>
+		{/if}
+
 		{#if app.view === 'camera'}
 			<Camera />
 		{/if}
@@ -124,6 +198,10 @@
 		<Settings />
 	{/if}
 
+	{#if app.view === 'archive'}
+		<Archive />
+	{/if}
+
 	{#if app.view === 'campick'}
 		<CameraPick />
 	{/if}
@@ -131,6 +209,10 @@
 	{#if app.view === 'needphoto'}
 		<PhotoRequired />
 	{/if}
+
+	<!-- Not an `app.view` case: the gate has to paint *over* Settings, and `view`
+	     is a single scalar that would unmount it. `.scrim` is z70 to its z60. -->
+	<PinGate />
 
 	<Toast />
 </div>

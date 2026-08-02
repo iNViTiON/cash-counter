@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
-	import { encodePhoto } from '$lib/photo';
+	import { encodePhoto, photoFromBlob } from '$lib/photo';
 	import { app } from '$lib/state.svelte';
 
 	/**
@@ -100,9 +100,10 @@
 		const track = stream?.getVideoTracks()[0];
 		if (track && window.ImageCapture) {
 			try {
+				// The still comes back as a Blob already — hand it straight to the
+				// shared encoder rather than decoding it here.
 				const blob = await new window.ImageCapture(track).takePhoto();
-				const bmp = await createImageBitmap(blob);
-				const still = encodePhoto(bmp, bmp.width, bmp.height, app.photoMax);
+				const still = await photoFromBlob(blob, app.photoMax);
 				stopCam();
 				app.attachPhoto(still);
 				return;
@@ -111,9 +112,9 @@
 			}
 		}
 
-		const data = encodePhoto(video, video.videoWidth, video.videoHeight, app.photoMax);
+		const frame = await encodePhoto(video, video.videoWidth, video.videoHeight, app.photoMax);
 		stopCam();
-		app.attachPhoto(data);
+		app.attachPhoto(frame);
 	}
 
 	/** Both hand off to an input that outlives this overlay, so the stream goes first. */

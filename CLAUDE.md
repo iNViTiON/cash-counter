@@ -37,7 +37,8 @@ directly; there are no stores and no prop drilling. Two rules follow from
 prerendering:
 
 - The constructor must not touch browser APIs — module init runs during the
-  build. `hydrate()` (called from `onMount`) does all `localStorage` reading.
+  build. `hydrate()` (called from `onMount`) does all `localStorage` reading,
+  and `src/lib/db.ts` must not open its IndexedDB connection at import time.
 - DOM handles (`inputs`, `scroller`) live on `app` as `$state` so `bind:this`
   does not warn; element *dimensions* (`midW`, `midH`) are pushed onto `app` by
   the page, because overlays size themselves against that area.
@@ -55,15 +56,106 @@ compares the area the image would cover beside the counts versus under them and
 picks the winner, so tall photos go right and wide ones go bottom. The count
 grid is `auto-fill` at 240px and reflows to match.
 
-**Persistence** is four `localStorage` keys (`src/lib/storage.ts`). Reads are
-defensive and writes return `false` on quota failure, which surfaces as a toast
-— storage never throws into the UI. Photos are downscaled JPEG data URLs stored
-alongside the slot. `src/lib/photo.ts` is the one encoder every path uses
-(in-app camera, system camera, file chooser): it fits the longest edge to
-`cfg.photoMax` and steps quality down from 0.88 until the data URL is under
-~1.2 MB, so a photo slot costs at most that against the 5 MB quota.
+**Persistence is split by what has to be synchronous.** Settings (`ec.cfg`) and
+the working count (`ec.ws`) stay in `localStorage` (`src/lib/storage.ts`),
+because `measure()` reads `cfg.padSize` on the same tick as `hydrate()` and
+because a count restored a frame late is a count the user can type over and
+lose. Keeping `saveWorkspace()` synchronous is also what lets it run inside a
+`visibilitychange` handler and stops the 260 ms debounce racing itself.
 
-**Offline is a hard requirement**: every feature must work with no network.
+Slots, the quick slot and every photo live in **IndexedDB** — `src/lib/db.ts`
+is generic glue, `src/lib/store.ts` is the record layer on top, the same split
+as `storage.ts` / `state.svelte.ts`. Photos are `Blob`s in their own store,
+keyed by the owning slot's id (the workspace photo under `'ws'`). This is not
+the 5 MB `localStorage` pool: quota is a share of the disk, so the old ceiling
+of three or four photo slots is gone.
+
+`hydrate()` is synchronous and `load()` is not. `app.ready` guards the gap, and
+it is **load-bearing, not cosmetic**: `#prune()` reads `app.slots`, so running
+it before the read lands would write an empty array back over every saved slot.
+
+`navigator.storage.persist()` is called unconditionally on every launch from
+`load()`. Safari deletes script-created storage after seven days without user
+interaction, and persistence is the documented exemption — for an app holding
+photo evidence of counted cash, that call is the difference between a backup
+and a rumour.
+
+`src/lib/photo.ts` is the one encoder every path uses (in-app camera, system
+camera, file chooser). `photoFromBlob` is the entry point: it fits the longest
+edge to `cfg.photoMax`, steps quality down from 0.88 to fit ~2 MB, and passes
+the original bytes straight through when they already fit. It asks for
+`imageOrientation: 'from-image'` explicitly, because `<img>` always applies EXIF
+and `createImageBitmap`'s default has varied by engine.
+
+**Cloud backup is bring-your-own-bucket, with no server of ours.** The browser
+signs SigV4 itself (`src/lib/sigv4.ts`) and talks to an S3-compatible bucket
+directly. Presigned query params, not an `Authorization` header — the reason
+that decides it is that only `host` gets signed, so the browser is free to add
+`Origin`, `Referer` and `sec-fetch-*` without breaking the signature.
+`bun run check:sigv4` diffs the signer against bun's native presigner and must
+stay at 74/74.
+
+Object layout, and the reasoning that is easy to undo by accident:
+
+- `slots/<13-digit inverted ts>_<uuid>.json` and `photos/<uuid>.jpg`. Listings
+  are ascending-only, so inverting the timestamp makes "newest N" a `max-keys`
+  and "everything expired" one `start-after` range.
+- **Keys carry nothing user-typed.** A key is immutable, so anything encoded
+  there is frozen at write time.
+- **Upload photo first, then JSON. Delete JSON first, then photo.** The JSON is
+  the commit record either way: a crash must leave a collectable orphan, never a
+  slot pointing at evidence that is gone.
+- `s3List` returns every page or throws, never a partial. Orphan GC subtracts
+  one listing from another, so a silently short listing there deletes live
+  evidence. GC is additionally all-or-nothing and has a ratio fuse.
+- The UI never deletes cloud objects; only the cloud retention window does. That
+  is what makes this a backup rather than a mirror — but it is a **UI policy,
+  not a token restriction**: the writer's token must have `DeleteObject` or
+  retention cannot run.
+
+`src/lib/cloud.svelte.ts` is loaded by dynamic import and only when credentials
+exist, so an unconfigured device evaluates none of it — no fetch, no timer, no
+listener. The upload queue is `$derived` from `Slot.syncedAt`, never stored, so
+there is no outbox to keep in step and no way for one to hold a stale copy of a
+photo. `CloudCfg.syncFrom` is stamped when sync is switched on so that pasting
+credentials does not immediately push every existing slot over cellular.
+
+**A background sync failure must never toast.** It fires right after `#commit`,
+where it would paint over the "Saved · …" the user needs to see. Only a run the
+user asked for passes `loud`. The failure still lands in `status`/`lastError`,
+which the settings card renders.
+
+**The cloud viewer is a screen, not a mode.** The archive gains a profile
+picker; pointing it at another machine's bucket changes what that screen lists
+and nothing else. The app keeps counting and saving normally — there is no
+whole-app read-only state, no dimming and no viewer bar, because viewing another
+till's records is not a reason to stop working.
+
+- **Remote data lives in `viewer.svelte.ts` and only there.** It never reaches
+  `app.slots`, so `#prune()` — which runs on save/load against the *local*
+  retention window — can never see it, and no persistence path can write it here.
+- `src/lib/remote.ts` exports `list` and `get` and **nothing else**. That absence
+  is the read-only enforcement; a `readOnly: true` flag would only invite a
+  future branch to ignore it. What it cannot enforce: whoever holds a viewer
+  profile holds a bucket credential and can use it with curl. The real control is
+  the token's scope, and the real revocation is rotating it on the source machine.
+- **Two different PINs.** `app.lock.pin` is this device's. A source machine's PIN
+  is read from its `meta/lock.json`, held in a local `const` for the length of
+  `openRemote`, and discarded — never `$state`, never storage, never a profile.
+  It gates the screen only, and the bucket's read key is a superset of it.
+- Clearing a PIN writes `{"pin":""}` rather than deleting the object: deleting
+  needs a scope the owner may not have, and it would collapse "no PIN set" and
+  "this key cannot read meta/" into the same 404. Entry refuses on 403 and on
+  network failure rather than failing open.
+- `ec.cloud.key` is this device's read-write pair for its own bucket;
+  `ec.remotes` holds read-only keys for other machines'. The viewer path never
+  reads the former and the sync path never reads the latter.
+
+**Offline is a hard requirement** for counting and saving: those must work with
+no network, and sync is strictly additive on top. Sync never blocks a save. The
+viewer is the one feature that genuinely cannot work offline — it must never
+make an offline path *look* broken, but it is allowed to say it needs a
+connection.
 Nothing may be fetched at runtime. Fonts are self-hosted in `static/fonts/` for
 this reason — a Google Fonts `<link>` would break the first offline load. Any new
 asset type must be added to `workbox.globPatterns` in `vite.config.ts` or it
@@ -101,7 +193,38 @@ will not be precached.
   over the old number instead of appending. Backspace and CLR count as editing.
 - Saving a slot moves the photo to the slot and clears it from the workspace;
   quantities stay.
-- Retention pruning happens on save/load, not on a timer.
+- Retention pruning happens on save/load, not on a timer. `#prune()` returns
+  `{ kept, gone }` and the `gone` ids own photo blobs — dropping a slot without
+  its photo refills the quota silently.
+- **Never `await` between opening an IndexedDB transaction and issuing its
+  requests.** The transaction goes inactive at the end of the creating task;
+  Safari enforces it and the error is an opaque `TransactionInactiveError`.
+- **Every value handed to IndexedDB must be `$state.snapshot()`ed first.**
+  Structured clone throws `DataCloneError` on a Svelte proxy. `JSON.stringify`
+  read through proxies happily, so the old code never had to think about it.
+- IDB writes resolve on `tx.oncomplete`, never `req.onsuccess` — a quota failure
+  arrives on the transaction abort, so resolving early reports success for a
+  write that then rolled back.
+- Shared CSS lives in `src/app.css`. `.head`, `.wide`, `.name` and the `.seg`
+  sizing are scoped (`.card .head`, `.setting .name`) because Camera, Keypad,
+  SlotDetail, SlotStrip, TotalBar and TopBar already own those names.
+- **The PIN gate is `app.gate`, not an `app.view` value.** `view` is a single
+  scalar, so `view = 'pin'` would unmount the Settings screen being gated and
+  collapse `padOpen`. The sheet uses the global `.scrim` (z70) over Settings'
+  `.screen` (z60); neither `.app` nor `.mid` makes a stacking context, so it
+  composes. Keypad stays mounted behind it and the scrim eats the taps — which
+  is why PinGate's key grid is `.pin-grid`, not `.grid`.
+- Gating lives in state methods, not call sites: the public method is the guard
+  and a private one does the work, the same shape as `commitSave()` → `#commit()`.
+  `#closeGate()` is the only exit — a surviving `#pending` would make the *next*
+  unlock run an action nobody asked for. Any success toast belongs **inside** the
+  job, since a gated method returns before the user has typed anything.
+- Unlock is a sliding five-minute window, and `#allow()` compares `Date.now()`
+  rather than trusting the timer: a backgrounded PWA can freeze timers and fire
+  them late, which would otherwise extend the window past its real expiry.
+- The PIN is plaintext in `ec.lock` by decision — a mis-tap guard, not security.
+  Setup says so in as many words; do not quietly "upgrade" it to a hash and
+  imply protection it does not provide.
 
 ## Design source
 

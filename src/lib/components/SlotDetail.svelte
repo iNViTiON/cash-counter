@@ -1,6 +1,26 @@
 <script lang="ts">
+	import { blobUrl } from '$lib/bloburl.svelte';
 	import { CENTS, denomLabel, dmy, hm, money, pieces } from '$lib/format';
 	import { app } from '$lib/state.svelte';
+	import { readPhoto } from '$lib/store';
+	import type { Slot, Where } from '$lib/types';
+
+	interface Props {
+		/** The slot to show. Defaults to the strip's selection. */
+		slot?: Slot | null;
+		/** Cloud-only rows have nothing here to delete or reload. */
+		readonly?: boolean;
+		/** Where the evidence comes from. Cloud rows override this. */
+		photoSrc?: ((id: string) => Promise<Blob | null>) | null;
+		where?: Where | null;
+	}
+
+	let {
+		slot: slotProp = undefined,
+		readonly = false,
+		photoSrc = null,
+		where = null
+	}: Props = $props();
 
 	/** Padding and gap around the photo pane inside the dialog. */
 	const FRAME_W = 40;
@@ -10,7 +30,7 @@
 	const RIGHT_SHARE = 0.42;
 	const BOTTOM_SHARE = 0.54;
 
-	const slot = $derived(app.openSlot);
+	const slot = $derived(slotProp !== undefined ? slotProp : app.openSlot);
 	const shown = (cents: number): boolean => app.cfg.enabled[cents] !== false;
 
 	/**
@@ -29,11 +49,25 @@
 
 	/** Photo aspect ratio, known only once the image has decoded. */
 	let ar = $state(0);
+	/** Evidence bytes, fetched on open rather than held in memory for every slot. */
+	let blob = $state<Blob | null>(null);
+	const url = blobUrl(() => blob);
 
-	// A different slot means a different photo; forget the old shape.
+	// A different slot means a different photo; forget the old shape and fetch.
 	$effect(() => {
-		void app.openId;
+		const id = slot?.id;
 		ar = 0;
+		blob = null;
+		if (!id || !slot?.photo) return;
+		// Opening A then B quickly would otherwise let A's read land last and
+		// show the wrong evidence under B's numbers.
+		let alive = true;
+		void (photoSrc ?? readPhoto)(id).then((b) => {
+			if (alive) blob = b;
+		});
+		return () => {
+			alive = false;
+		};
 	});
 
 	/**
@@ -68,7 +102,8 @@
 	}
 
 	function close(): void {
-		app.view = null;
+		// The archive detail came from the archive list, so it goes back there.
+		app.view = app.view === 'archslot' ? 'archive' : null;
 		app.openId = null;
 	}
 </script>
@@ -79,7 +114,10 @@
 			<div class="head">
 				<div class="who">
 					<div class="name">{slot.label}</div>
-					<div class="stamp">{dmy(new Date(slot.ts))} {hm(new Date(slot.ts))} · saved</div>
+					<div class="stamp">
+						{dmy(new Date(slot.ts))}
+						{hm(new Date(slot.ts))} · saved{where ? ` · ${where}` : ''}
+					</div>
 				</div>
 				<div class="spacer"></div>
 				<div class="sum">
@@ -106,19 +144,32 @@
 
 				<div class="side" style:flex={layout.pane}>
 					<div class="photo">
+						<!-- An empty pane for a few ms reads as nothing; "NO PHOTO"
+						     flashing on a slot that has one reads as data loss. -->
 						{#if slot.photo}
-							<img alt="Evidence" src={slot.photo} onload={onPhotoLoad} />
+							{#if url.current}
+								<img alt="Evidence" src={url.current} onload={onPhotoLoad} />
+							{/if}
 						{:else}
 							<div class="no-photo">NO PHOTO</div>
 						{/if}
 					</div>
 					<div class="acts">
-						<button type="button" class="btn-primary load" onclick={() => app.loadSlot()}>
+						<!-- Loading counts is safe from a cloud row: it copies numbers
+						     into the workspace and touches nothing remote. Deleting is
+						     not offered, because the UI never deletes cloud objects. -->
+						<button
+							type="button"
+							class="btn-primary load"
+							onclick={() => app.loadCounts(slot.qty)}
+						>
 							LOAD COUNTS
 						</button>
-						<button type="button" class="btn btn-danger del" onclick={() => app.deleteSlot()}>
-							DELETE
-						</button>
+						{#if !readonly}
+							<button type="button" class="btn btn-danger del" onclick={() => app.deleteSlot()}>
+								DELETE
+							</button>
+						{/if}
 					</div>
 				</div>
 			</div>

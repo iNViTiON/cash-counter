@@ -19,7 +19,7 @@ Built from the `EuroCash.dc.html` Claude Design project.
 | Offline   | `@vite-pwa/sveltekit` (Workbox `generateSW`), everything precached |
 | Runtime   | Bun only — no Node.js in the dev shell                             |
 | Env       | Nix flake + direnv                                                 |
-| Storage   | `localStorage`                                                     |
+| Storage   | IndexedDB (slots, photos) + `localStorage` (settings, working count) |
 | Deploy    | Cloudflare Pages, static assets only                               |
 
 ## Getting started
@@ -64,8 +64,19 @@ rewrites unknown paths onto the SPA shell.
 ## How it is put together
 
 ```
-src/lib/format.ts          denominations, money/date formatting
-src/lib/storage.ts         localStorage read/write, quota-safe
+src/lib/format.ts          denominations, money/date/size formatting
+src/lib/storage.ts         localStorage read/write, quota-safe (settings + working count)
+src/lib/db.ts              IndexedDB glue: lazy connection, promise wrappers
+src/lib/store.ts           slots, photos and the quick slot on top of db.ts
+src/lib/migrate.ts         one-time move of the old localStorage records into IndexedDB
+src/lib/photo.ts           the one JPEG encoder every capture path uses
+src/lib/bloburl.svelte.ts  object URL that revokes itself when the blob goes away
+src/lib/sigv4.ts           AWS SigV4 presigner on WebCrypto (see `bun run check:sigv4`)
+src/lib/s3.ts              PUT/GET/HEAD/DELETE/ListObjectsV2 over presigned URLs
+src/lib/cloudcfg.ts        cloud settings, credentials, and the object-key layout
+src/lib/cloud.svelte.ts    backup engine — upload queue, retention, orphan GC
+src/lib/remote.ts          read-only access to another machine's bucket
+src/lib/viewer.svelte.ts   viewer profiles and the remote archive listing
 src/lib/state.svelte.ts    the whole app state as one runes class, exported as `app`
 src/lib/components/        TopBar, DenomList, Keypad, SaveBar, TotalBar,
                            SlotStrip, SlotDetail, Camera, Settings, Toast
@@ -111,10 +122,35 @@ and using the quick slot — all after `fetch()` to the origin started throwing.
 - **Saving hands the photo over.** The slot keeps the evidence and the workspace
   is left without it, so the next count cannot file the previous count's photo.
   The quantities stay on screen.
-- **Photo evidence** is a downscaled (1280 px, JPEG q0.7) data URL kept in
-  `localStorage` alongside the slot, as in the design. That is roughly 200–400 KB
-  per photo against a 5 MB quota, so expect about a dozen photo slots before
-  saving starts to fail — the app catches the quota error and says so rather than
-  losing the count. Move slots to IndexedDB if that ceiling becomes a problem.
+- **Photo evidence** is a downscaled JPEG `Blob` (longest edge 1280/1800/2400 by
+  setting, quality stepped down from 0.88 to fit ~2 MB) kept in IndexedDB, keyed
+  by the slot that owns it. Quota is a share of the disk rather than the 5 MB
+  `localStorage` pool, so hundreds of photo slots fit where three or four used
+  to. A genuine quota error still surfaces as a toast rather than losing a count.
+- **Storage protection.** The app calls `navigator.storage.persist()` on every
+  launch. Safari otherwise deletes script-created storage after seven days
+  without user interaction, which for photo evidence is silent data loss. If the
+  browser declines, Settings shows the current usage and a PROTECT STORAGE
+  button; adding the app to the home screen is what usually flips it.
 - **Retention**: slots older than the configured 7 or 31 days are pruned on the
   next save or load, not on a timer.
+- **Cloud backup is optional and bring-your-own.** There is no server: the
+  browser signs SigV4 itself and talks to a bucket you own (Cloudflare R2 by
+  default, but any S3-compatible endpoint works). With nothing configured the app
+  loads no cloud code at all. Settings carries a five-step setup guide and
+  generates the CORS policy you need to paste on your bucket.
+  - Deleting a slot here removes the **local** copy only. Cloud objects go when
+    the separate cloud retention window passes, which is what makes this a backup
+    rather than a mirror. That window only runs while a writer device has the app
+    open — an R2 bucket lifecycle rule is the belt-and-braces version.
+  - Credentials are stored on the device in plain text. **Scope the token to
+    Object Read & Write on a single bucket**, never account-wide: anything that
+    can read this browser's storage can read them, and no browser storage
+    prevents that.
+- **Cloud viewer** profiles let you browse another machine's bucket read-only
+  from the archive screen. Give them an **Object Read only** token. Handing
+  someone a profile hands them that bucket's data until you rotate the token —
+  the PIN check gates this app's screen, not the bucket.
+- **Admin PIN** sits in front of deleting slots, shortening retention, and the
+  cloud and viewer settings. It is stored in plain text and is a guard against a
+  wrong tap, not a security control; the setup screen says so.
