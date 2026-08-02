@@ -80,6 +80,17 @@ export class CloudLink {
 	 */
 	pending = $derived(app.slots.filter((s) => !s.syncedAt && s.ts >= this.cfg.syncFrom));
 
+	/**
+	 * Every slot not in the bucket, ignoring `syncFrom`.
+	 *
+	 * `pending` is what uploads on its own; this is the honest "not backed up"
+	 * count. They differ for slots that existed before sync was switched on, and
+	 * conflating them was a real bug: the button offering to back those up was
+	 * gated on `pending.length`, which excludes exactly them, so it never
+	 * appeared and the bucket stayed empty with nothing on screen to explain it.
+	 */
+	backlog = $derived(app.slots.filter((s) => !s.syncedAt));
+
 	ready = $derived(cloudReady(this.cfg, readKey()));
 
 	/**

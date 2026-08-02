@@ -79,8 +79,8 @@
 		busy = false;
 	}
 
-	const pendingBytes = $derived(
-		(link?.pending ?? []).reduce((n, s) => n + (s.photo?.bytes ?? 0) + 400, 0)
+	const backlogBytes = $derived(
+		(link?.backlog ?? []).reduce((n, s) => n + (s.photo?.bytes ?? 0) + 400, 0)
 	);
 
 	/**
@@ -336,10 +336,13 @@
 		<button type="button" class="btn wide" onclick={() => edit(() => void app.link?.backupNow())}>BACK UP NOW</button>
 	</div>
 
-	{#if link && link.pending.length}
+	<!-- Gated on the backlog, not on `pending`: slots saved before sync was
+	     switched on are deliberately excluded from the automatic queue, and this
+	     is the only control that will send them. -->
+	{#if link && link.backlog.length}
 		<div class="danger-row">
 			<button type="button" class="btn wide" onclick={() => edit(() => void app.link?.backupAll())}>
-				BACK UP {link.pending.length} WAITING · ~{bytes(pendingBytes)}
+				BACK UP {link.backlog.length} NOT YET SAVED · ~{bytes(backlogBytes)}
 			</button>
 		</div>
 	{/if}
@@ -348,7 +351,7 @@
 		{#if probeResult}<div class:err={busy === false && !probeResult.startsWith('Bucket')}>{probeResult}</div>{/if}
 		{#if link}
 			<div>
-				{link.status} · {link.pending.length} waiting{link.cfg.lastSyncAt
+				{link.status} · {link.backlog.length} not backed up{link.cfg.lastSyncAt
 					? ` · last ${dmy(new Date(link.cfg.lastSyncAt))} ${hm(new Date(link.cfg.lastSyncAt))}`
 					: ''}
 			</div>
