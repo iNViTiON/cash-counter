@@ -4,7 +4,11 @@
 // for information about these interfaces
 declare global {
 	namespace App {
-		// interface Error {}
+		interface Error {
+			/** Real message and stack, kept by `hooks.client.ts` so the error page
+			 *  can show them — on a till there is no console to look at. */
+			detail?: string;
+		}
 		// interface Locals {}
 		// interface PageData {}
 		// interface PageState {}

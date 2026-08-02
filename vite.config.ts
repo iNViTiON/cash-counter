@@ -58,6 +58,12 @@ export default defineConfig({
 				// first offline load falls back to system typography.
 				globPatterns: ['client/**/*.{js,css,html,ico,png,svg,webp,woff2,webmanifest}'],
 				navigateFallback: '/',
+				// Without this a missing hashed asset is answered with the SPA shell,
+				// because `static/_redirects` rewrites anything unmatched to
+				// `/index.html` with a 200. The browser then parses HTML as
+				// JavaScript and the app dies with an opaque syntax error rather
+				// than a clean 404.
+				navigateFallbackDenylist: [/^\/_app\//, /^\/fonts\//, /^\/icons\//],
 				cleanupOutdatedCaches: true,
 				clientsClaim: true,
 				skipWaiting: true,
