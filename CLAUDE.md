@@ -222,6 +222,28 @@ will not be precached.
 - Unlock is a sliding five-minute window, and `#allow()` compares `Date.now()`
   rather than trusting the timer: a backgrounded PWA can freeze timers and fire
   them late, which would otherwise extend the window past its real expiry.
+- **Cloud settings are gated as a section, not per control.** `CloudCard` and
+  `SettingsViewer` derive `locked = app.pinSet && !app.unlocked`; every mutating
+  control routes through `edit()`, which hands the job to `app.guard` so one
+  prompt both unlocks and runs the tap that triggered it. Gating each control
+  separately made every button need pressing twice.
+- The credentials are the crown jewels, not the slots: they grant every photo in
+  the bucket and repointing the endpoint silently redirects future backups. That
+  is why reveal, edit, share and import are all gated while the keypad layout and
+  camera choice are not.
+- `cloudshare.ts` packs the whole cloud config into one `EC1.<base64url>.<sum>`
+  token so the machine with Cloudflare access can hand it to the tablet in one
+  paste. **It carries the secret key in clear** — deliberately not encrypted,
+  because a shared passphrase would just be another secret to move, and base64
+  dressed up as protection is worse than saying plainly that it is not. The
+  checksum only exists so a truncated paste fails loudly instead of
+  half-configuring a device.
+- `loadCloudEngine()` exists separately from `startCloud()` because TEST
+  CONNECTION has to work *before* the sync switch is on — otherwise the only way
+  to check your keys is to commit to them first.
+- `CloudCard`'s visible fields are seeded synchronously from `app.cloudCfg`, not
+  from an `$effect`. An effect runs after mount, so anything calling
+  `applyFields()` first wrote empty strings over a good endpoint and bucket.
 - The PIN is plaintext in `ec.lock` by decision — a mis-tap guard, not security.
   Setup says so in as many words; do not quietly "upgrade" it to a hash and
   imply protection it does not provide.

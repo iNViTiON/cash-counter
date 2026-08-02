@@ -1,5 +1,5 @@
 import type { CloudLink } from './cloud.svelte';
-import { cloudConfigured, defaultCloud, readCloud, writeCloud } from './cloudcfg';
+import { cloudConfigured, defaultCloud, readCloud, readKey, writeCloud } from './cloudcfg';
 import { available } from './db';
 import { CENTS, dmy, money } from './format';
 import { migrate } from './migrate';
@@ -368,6 +368,24 @@ class CashCounter {
 		m.link.start();
 	}
 
+	/**
+	 * Loads the engine for a connection test, before sync has been switched on.
+	 *
+	 * `startCloud` deliberately requires `cfg.on` — that is what keeps an
+	 * unconfigured device from evaluating any cloud code. But TEST CONNECTION has
+	 * to work *before* you commit to turning sync on, or the only way to find out
+	 * whether your keys are right is to switch it on and hope. So this needs the
+	 * endpoint, bucket and key, and pointedly not the switch.
+	 */
+	async loadCloudEngine(): Promise<CloudLink | null> {
+		if (this.link) return this.link;
+		const cfg = readCloud();
+		if (!cfg.endpoint || !cfg.bucket || !readKey()) return null;
+		const m = await import('./cloud.svelte');
+		this.link = m.link;
+		return m.link;
+	}
+
 	/** Turning sync on for the first time has to load the engine there and then. */
 	async enableCloud(): Promise<void> {
 		await this.startCloud();
@@ -543,15 +561,14 @@ class CashCounter {
 	}
 
 	/**
-	 * Gated reveal of a stored credential. Hiding again is never gated — only
-	 * turning a secret back into readable text is.
+	 * Public gate, for components that need one. Everything cloud-related goes
+	 * through here: the credentials grant every photo in the bucket, so a PIN
+	 * that stops someone deleting one slot but lets them read — or repoint — the
+	 * bucket key has protected the cheap thing and left the expensive one open.
 	 *
-	 * Worth stating why this matters more than the delete gates: a PIN that stops
-	 * someone deleting one slot but lets them read the bucket key off the screen
-	 * has protected the cheap thing and left the expensive one open, since that
-	 * key grants every photo in the bucket.
+	 * Pass an empty job to just open the unlock window for a whole section.
 	 */
-	revealSecret(why: string, job: () => void): void {
+	guard(why: string, job: () => void = () => {}): void {
 		this.#allow(why, job);
 	}
 
@@ -1045,7 +1062,15 @@ class CashCounter {
 	}
 
 	toggleAutoSave(): void {
-		const on = !this.cfg.autoSave;
+		// Turning it ON only starts remembering. Turning it OFF drops the working
+		// count and its photo on the spot, which is the destructive direction.
+		if (this.cfg.autoSave) {
+			return this.#allow('Stop remembering the current count', () => this.#setAutoSave(false));
+		}
+		this.#setAutoSave(true);
+	}
+
+	#setAutoSave(on: boolean): void {
 		this.cfg.autoSave = on;
 		this.persistCfg();
 		if (on) return this.saveWorkspace();

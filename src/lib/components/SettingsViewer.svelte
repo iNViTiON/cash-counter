@@ -11,13 +11,21 @@
 	let secretAccessKey = $state('');
 	let showSecret = $state(false);
 
+	/** Same section-level gate as the cloud card — these are bucket keys too. */
+	const locked = $derived(app.pinSet && !app.unlocked);
+
+	function unlock(): void {
+		app.guard('Change viewer profiles');
+	}
+
 	/** Revealing the key is gated; hiding it again is not. */
 	function toggleSecret(): void {
 		if (showSecret) {
 			showSecret = false;
 			return;
 		}
-		app.revealSecret('Show this profile’s secret access key', () => (showSecret = true));
+		if (locked) return unlock();
+		app.guard('Show this profile’s secret access key', () => (showSecret = true));
 	}
 
 	const complete = $derived(
@@ -76,7 +84,13 @@
 		<div class="none">No viewer profiles.</div>
 	{/if}
 
-	<button type="button" class="disclose" onclick={() => (open = !open)}>
+	{#if locked}
+		<button type="button" class="locked" onclick={unlock}>
+			LOCKED · TAP TO UNLOCK WITH THE ADMIN PIN
+		</button>
+	{/if}
+
+	<button type="button" class="disclose" onclick={() => (locked ? unlock() : (open = !open))}>
 		{open ? '▾' : '▸'} ADD A PROFILE
 	</button>
 
@@ -122,6 +136,25 @@
 </section>
 
 <style>
+	.locked {
+		width: 100%;
+		margin-top: 8px;
+		padding: 9px 12px;
+		border: 1px solid var(--line-strong);
+		border-radius: 9px;
+		background: var(--sunk);
+		color: var(--acc);
+		cursor: pointer;
+		font-family: var(--sans);
+		font-size: 10px;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+	}
+
+	.locked:hover {
+		border-color: var(--acc);
+	}
+
 	.disclose {
 		width: 100%;
 		margin-top: 8px;
