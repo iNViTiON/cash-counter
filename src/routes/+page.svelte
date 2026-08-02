@@ -4,7 +4,8 @@
 	import CameraPick from '$lib/components/CameraPick.svelte';
 	import DenomList from '$lib/components/DenomList.svelte';
 	import Keypad from '$lib/components/Keypad.svelte';
-	import Archive from '$lib/components/Archive.svelte';
+	import AllSlots from '$lib/components/AllSlots.svelte';
+	import AskProfile from '$lib/components/AskProfile.svelte';
 	import PhotoRequired from '$lib/components/PhotoRequired.svelte';
 	import PinGate from '$lib/components/PinGate.svelte';
 	import SaveBar from '$lib/components/SaveBar.svelte';
@@ -58,46 +59,12 @@
 	}
 
 	/**
-	 * The archive detail. A cloud-only row has no local `Slot`, so one is built
-	 * from the cached index — it is display data only and never reaches storage.
-	 */
-	const archRow = $derived(
-		app.viewer?.active
-			? (app.viewer.entries
-					.filter((e) => e.id === app.openId)
-					.map((e) => ({
-						id: e.id,
-						ts: e.ts,
-						label: e.label ?? '',
-						date: e.date ?? '',
-						total: e.total ?? 0,
-						where: 'cloud' as const,
-						local: null,
-						cloud: e
-					}))[0] ?? null)
-			: (app.link?.merged.find((r) => r.id === app.openId) ?? null)
-	);
-	const archSlot = $derived(
-		archRow
-			? (archRow.local ?? {
-					id: archRow.id,
-					label: archRow.label,
-					date: archRow.date,
-					ts: archRow.ts,
-					total: archRow.total,
-					qty: archRow.cloud?.qty ?? {},
-					photo: archRow.cloud?.photoKey ? { bytes: 0, w: 0, h: 0 } : null,
-					updatedAt: archRow.ts
-				})
-			: null
-	);
-	/**
-	 * Evidence for an archive row. A remote profile serves from its own cached
-	 * object URLs, keyed by profile so one machine's photo can never surface
-	 * under another's slot.
+	 * Evidence for a row with no local copy. A remote profile serves from its own
+	 * cached object URLs, keyed by profile so one machine's photo can never
+	 * surface under another's slot.
 	 */
 	const cloudPhoto = async (): Promise<Blob | null> => {
-		const entry = archRow?.cloud;
+		const entry = app.openRow?.cloud;
 		if (!entry) return null;
 		if (app.viewer?.active) {
 			const url = await app.viewer.photoUrl(entry);
@@ -171,19 +138,18 @@
 			<Keypad />
 		{/if}
 
-		{#if app.view === 'slot'}
-			<SlotDetail />
-		{/if}
-
-		<!-- Inside `.mid`, not in the full-screen Archive shell: SlotDetail's photo
-		     placement measures against midW/midH and its overlay is absolute
-		     against `.mid`. A fixed shell would size it against the wrong box. -->
-		{#if app.view === 'archslot' && archRow}
+		<!--
+			One detail for all three kinds of row. It must stay inside `.mid`:
+			SlotDetail's photo placement measures against midW/midH and its overlay is
+			absolute against `.mid`, so a fixed full-screen shell would size it
+			against the wrong box.
+		-->
+		{#if app.view === 'slot' && app.openRow}
 			<SlotDetail
-				slot={archSlot}
-				where={archRow.where}
-				readonly={!archRow.local}
-				photoSrc={archRow.local ? null : cloudPhoto}
+				slot={app.detailSlot}
+				where={app.openRow.where}
+				readonly={!app.openRow.local}
+				photoSrc={app.openRow.local ? null : cloudPhoto}
 			/>
 		{/if}
 
@@ -194,12 +160,16 @@
 
 	<SlotStrip />
 
+	{#if app.allOpen}
+		<AllSlots />
+	{/if}
+
 	{#if app.view === 'settings'}
 		<Settings />
 	{/if}
 
-	{#if app.view === 'archive'}
-		<Archive />
+	{#if app.askProfile}
+		<AskProfile />
 	{/if}
 
 	{#if app.view === 'campick'}

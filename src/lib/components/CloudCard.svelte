@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { readKey, writeKey } from '$lib/cloudcfg';
-	import { decodeConfig, encodeConfig } from '$lib/cloudshare';
+	import { decodeConfig, encodeConfig, encodeFor } from '$lib/cloudshare';
 	import { bytes, dmy, hm } from '$lib/format';
 	import { app } from '$lib/state.svelte';
 	import type { MaxAge } from '$lib/types';
@@ -120,6 +120,56 @@
 	let shareToken = $state('');
 	let importText = $state('');
 	let importErr = $state('');
+
+	/**
+	 * The string builder.
+	 *
+	 * This device holds exactly one key — the read-write one it backs up with —
+	 * so it cannot honestly produce a read-only string from what it has. Giving
+	 * someone view-only access means making a read-only key in the bucket console
+	 * and wrapping it around this device's endpoint, bucket, region and prefix,
+	 * which is all this does.
+	 */
+	let gen = $state<{ name: string; keyId: string; secret: string; scope: 'viewer' | 'backup' } | null>(
+		null
+	);
+	const genReady = $derived(Boolean(gen?.keyId && gen?.secret));
+	const genText = $derived(
+		gen && genReady
+			? encodeFor(
+					gen.scope,
+					gen.name.trim() || cfg.bucket,
+					{
+						endpoint: cfg.endpoint,
+						bucket: cfg.bucket,
+						region: cfg.region,
+						style: cfg.style,
+						prefix: cfg.prefix,
+						cloudAge: cfg.cloudAge
+					},
+					{ accessKeyId: gen.keyId, secretAccessKey: gen.secret }
+				)
+			: ''
+	);
+
+	function openGen(): void {
+		edit(() => {
+			if (!cfg.endpoint || !cfg.bucket) return app.say('Fill in the endpoint and bucket first');
+			applyFields();
+			share = null;
+			gen = { name: '', keyId: '', secret: '', scope: 'viewer' };
+		});
+	}
+
+	async function copyGen(): Promise<void> {
+		if (!genText) return;
+		try {
+			await navigator.clipboard.writeText(genText);
+			app.say('String copied');
+		} catch {
+			app.say('Could not copy — select it by hand');
+		}
+	}
 
 	/** Generating exposes the secret key — the section gate already covers it. */
 	function openExport(): void {
@@ -285,19 +335,22 @@
 				Independent of the local window.
 				{#if cfg.cloudAge === app.cfg.maxAge}
 					Same as the local window — the cloud copy expires with the local one. Set 31 here and 7
-					locally for the archive to add anything.
+					locally for the strip to keep showing what the device has dropped.
 				{/if}
 			</div>
 		</div>
 		<div class="seg">
 			{#each [7, 31] as d (d)}
+				<!-- Gated like every other cloud control: shortening this is what
+				     decides when the off-device copy stops existing. -->
 				<button
 					type="button"
 					class:on={cfg.cloudAge === d}
-					onclick={() => {
-						cfg.cloudAge = d as MaxAge;
-						app.persistCloud();
-					}}
+					onclick={() =>
+						edit(() => {
+							cfg.cloudAge = d as MaxAge;
+							app.persistCloud();
+						})}
 				>
 					{d} DAYS
 				</button>
@@ -327,13 +380,80 @@
 	</div>
 
 	<div class="danger-row">
-		<button type="button" class="btn wide" onclick={openExport}>SHARE CONFIG</button>
-		<button type="button" class="btn wide" onclick={openImport}>IMPORT CONFIG</button>
-	</div>
-
-	<div class="danger-row">
 		<button type="button" class="btn wide" onclick={() => test()}>TEST CONNECTION</button>
 		<button type="button" class="btn wide" onclick={() => edit(() => void app.link?.backupNow())}>BACK UP NOW</button>
+	</div>
+
+	<div class="share-block">
+		<div class="label">SHARE ACCESS</div>
+		<div class="hint gap">
+			A string is endpoint, bucket and a key packed into one paste. This device only holds its
+			<b>own</b> key — the read-write one it backs up with — so it cannot invent a read-only string.
+			To hand someone view-only access, make a read-only key in your bucket console and build a
+			string around it here. Scope lives in the bucket policy; the app can only label what it was
+			told.
+		</div>
+		<div class="danger-row">
+			<button type="button" class="btn wide" onclick={openExport}>SHARE THIS DEVICE’S CONFIG</button>
+			<button type="button" class="btn wide view-btn" onclick={openGen}>BUILD A STRING</button>
+			<button type="button" class="btn wide" onclick={openImport}>PASTE A CONFIG</button>
+		</div>
+
+		{#if gen}
+			<div class="gen">
+				<div class="gen-head">
+					<div class="gen-cap">BUILD A STRING AROUND ANOTHER KEY</div>
+					<div class="spacer"></div>
+					<button type="button" class="btn x" title="Close" onclick={() => (gen = null)}>✕</button>
+				</div>
+				<div class="hint">
+					Takes this device's endpoint, bucket, region and prefix, and the key <i>you</i> paste —
+					never the one stored here. Make that key in your bucket console with the permissions you
+					actually want.
+				</div>
+
+				<div class="fields">
+					<label class="f"><span>Name other machines will see</span>
+						<input class="field prose" type="text" bind:value={gen.name} placeholder="Till 1 · Viru" /></label>
+					<label class="f"><span>Access key ID</span>
+						<input class="field" type="text" bind:value={gen.keyId} placeholder="paste the key you made" /></label>
+					<label class="f"><span>Secret access key</span>
+						<input class="field" type="text" bind:value={gen.secret} /></label>
+				</div>
+
+				<div class="scope">
+					<span class="scope-cap">THE KEY YOU PASTED IS</span>
+					<div class="seg">
+						<button type="button" class:on={gen.scope === 'viewer'} onclick={() => gen && (gen.scope = 'viewer')}>
+							FOR VIEWING
+						</button>
+						<button type="button" class:on={gen.scope === 'backup'} onclick={() => gen && (gen.scope = 'backup')}>
+							FULL ACCESS
+						</button>
+					</div>
+				</div>
+
+				{#if genReady}
+					<div class="gen-out">
+						<div class="gen-head">
+							<div class="gen-cap" class:view={gen.scope === 'viewer'}>
+								{gen.scope === 'viewer' ? '☁ VIEWER STRING' : 'FULL CONFIG STRING'}
+							</div>
+							<div class="spacer"></div>
+							<button type="button" class="btn tiny" onclick={copyGen}>COPY</button>
+						</div>
+						<textarea class="token" readonly rows="4" value={genText}></textarea>
+						<div class="caution">
+							{gen.scope === 'viewer'
+								? 'Marked read-only for the receiving app. That is a label, not a restriction — what it can actually do is whatever you scoped this key to in the bucket policy.'
+								: 'Marked read-write. The receiving till will back up into this same bucket.'}
+						</div>
+					</div>
+				{:else}
+					<div class="hint">Paste a key id and secret to build the string.</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 
 	<!-- Gated on the backlog, not on `pending`: slots saved before sync was
@@ -544,9 +664,11 @@
 		overflow-x: auto;
 	}
 
+	/* Two-up where there is room; one column on a phone. Six single-line fields
+	   stacked is a lot of scrolling on the one screen setup actually happens on. */
 	.fields {
-		display: flex;
-		flex-direction: column;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
 		gap: 9px;
 		margin: 11px 0;
 	}
@@ -568,6 +690,90 @@
 	.secret {
 		display: flex;
 		gap: 8px;
+	}
+
+	.share-block {
+		margin-top: 12px;
+		padding-top: 12px;
+		border-top: 1px solid var(--line-soft);
+	}
+
+	.view-btn {
+		border-color: var(--view-line);
+		background: var(--view-bg);
+		color: var(--view-fg);
+	}
+
+	.view-btn:hover {
+		border-color: var(--view);
+		color: var(--view-fg);
+	}
+
+	.gen {
+		margin-top: 10px;
+		padding: 11px;
+		border: 1px solid var(--view-line);
+		border-radius: 10px;
+		background: var(--strip);
+		display: flex;
+		flex-direction: column;
+		gap: 9px;
+	}
+
+	.gen-head {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.gen-cap {
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		color: var(--view-fg);
+	}
+
+	.gen-cap.view {
+		color: var(--view-fg);
+	}
+
+	.spacer {
+		flex: 1;
+	}
+
+	.tiny {
+		height: 30px;
+		padding: 0 11px;
+		border-radius: 7px;
+		font-size: 10px;
+	}
+
+	.gen-out {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		padding-top: 9px;
+		border-top: 1px solid var(--line-soft);
+	}
+
+	.scope {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		flex-wrap: wrap;
+	}
+
+	.scope-cap {
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.12em;
+		color: var(--muted-3);
+	}
+
+	.caution {
+		font-size: 10px;
+		line-height: 1.5;
+		color: #a8813f;
 	}
 
 	.status {

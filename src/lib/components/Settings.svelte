@@ -279,12 +279,6 @@
 				</div>
 			</section>
 
-			<SettingsPin />
-
-			<CloudCard />
-
-			<SettingsViewer />
-
 			<section class="card">
 				<div class="head">
 					<div class="label">SAVED SLOTS</div>
@@ -328,6 +322,14 @@
 					</button>
 				</div>
 			</section>
+
+			<!-- Directly under the buttons it guards, then the two cloud cards it also
+			     guards. Reading down the screen is the order the policy applies in. -->
+			<SettingsPin />
+
+			<CloudCard />
+
+			<SettingsViewer />
 
 			<section class="card">
 				<div class="label gap">STORAGE</div>

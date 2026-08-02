@@ -53,9 +53,18 @@
 				</div>
 			{/if}
 
-			<!-- Fixed height so the sheet never jumps as digits go in or errors appear. -->
+			<!--
+				Slots, not one dot per keypress: an empty outline says how many digits
+				are still expected, where a lone filled dot says nothing. The row grows
+				past the minimum for a longer PIN — this app allows 4 to 8, and a fixed
+				four would make an existing six-digit PIN look wrong as it was typed.
+
+				Fixed height so the sheet never jumps as digits go in or errors appear.
+			-->
 			<div class="dots">
-				{#each app.pinEntry.split('') as _, i (i)}<span class="dot">●</span>{/each}
+				{#each Array(Math.max(PIN_MIN, app.pinEntry.length)) as _, i (i)}
+					<span class="dot" class:filled={i < app.pinEntry.length}></span>
+				{/each}
 			</div>
 			<div class="err">
 				{#if app.pinStuck}
@@ -114,9 +123,19 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		gap: 8px;
-		font-size: 14px;
-		color: var(--acc);
+		gap: 13px;
+	}
+
+	.dot {
+		width: 13px;
+		height: 13px;
+		border: 1px solid #3a3e45;
+		border-radius: 50%;
+	}
+
+	.dot.filled {
+		background: var(--acc);
+		border-color: var(--acc);
 	}
 
 	.err {

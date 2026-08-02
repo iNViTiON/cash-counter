@@ -1,14 +1,17 @@
 /**
  * Browsing another machine's bucket, read-only.
  *
- * This is a **screen, not a mode**. The app keeps counting and saving normally
- * while the archive is pointed somewhere else — viewing another till's records
- * is not a reason to stop working. That also means there is no whole-app
- * read-only state to get wrong.
+ * This used to be a separate screen, on the argument that viewing another
+ * till's records is no reason to stop working. Then the archive became the slot
+ * strip itself, and that argument inverted: with one list on screen, a save made
+ * while browsing another machine would land in a list nobody can see. So while a
+ * profile is open, **committing is blocked** — `app.blockSave()` says which
+ * machine and how to leave. Counting, CLEAR and PHOTO are untouched; this is a
+ * save block, not a read-only app.
  *
- * The invariant that makes it safe: remote data lives here and only here. It
- * never reaches `app.slots`, so `#prune()` — which runs on save and load and
- * filters by the *local* retention window — can never see it, and no
+ * The invariant that makes it safe is unchanged: remote data lives here and only
+ * here. It never reaches `app.slots`, so `#prune()` — which runs on save and
+ * load and filters by the *local* retention window — can never see it, and no
  * persistence path can write it to this device's store.
  */
 
@@ -23,7 +26,7 @@ export class Viewer {
 	 * Session state only. The profile *list* lives on `app` so the settings card
 	 * can manage it with none of this module loaded.
 	 *
-	 * Null active means the archive is showing this device's own bucket.
+	 * Null active means the strip is showing this device's own slots and bucket.
 	 */
 	active = $state<Remote | null>(null);
 	entries = $state<CloudEntry[]>([]);

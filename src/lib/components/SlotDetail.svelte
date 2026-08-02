@@ -102,10 +102,23 @@
 	}
 
 	function close(): void {
-		// The archive detail came from the archive list, so it goes back there.
-		app.view = app.view === 'archslot' ? 'archive' : null;
+		app.view = null;
 		app.openId = null;
 	}
+
+	/**
+	 * Glyphs, matching the strip. `▣` is this device and `☁` is the bucket, so
+	 * `▣☁` reads as both without a third word for the combination.
+	 */
+	const badge = $derived(
+		where === 'both'
+			? { text: '▣☁ DEVICE + CLOUD', remote: false }
+			: where === 'cloud'
+				? { text: '☁ CLOUD', remote: true }
+				: where === 'local'
+					? { text: '▣ THIS DEVICE', remote: false }
+					: null
+	);
 </script>
 
 {#if slot}
@@ -113,10 +126,17 @@
 		<div class="panel">
 			<div class="head">
 				<div class="who">
-					<div class="name">{slot.label}</div>
+					<div class="titled">
+						<div class="name">{slot.label}</div>
+						{#if badge}
+							<span class="badge" class:remote={badge.remote}>{badge.text}</span>
+						{/if}
+					</div>
 					<div class="stamp">
 						{dmy(new Date(slot.ts))}
-						{hm(new Date(slot.ts))} · saved{where ? ` · ${where}` : ''}
+						{hm(new Date(slot.ts))} · {readonly
+							? (app.viewing?.name ?? 'in the cloud only')
+							: 'saved'}
 					</div>
 				</div>
 				<div class="spacer"></div>
@@ -163,12 +183,17 @@
 							class="btn-primary load"
 							onclick={() => app.loadCounts(slot.qty)}
 						>
-							LOAD COUNTS
+							{readonly ? 'LOAD FROM CLOUD' : 'LOAD COUNTS'}
 						</button>
 						{#if !readonly}
 							<button type="button" class="btn btn-danger del" onclick={() => app.deleteSlot()}>
 								DELETE
 							</button>
+						{:else}
+							<!-- Says why there is no DELETE, rather than leaving a gap the
+							     user has to interpret. The UI never removes a cloud object;
+							     only the retention window does. -->
+							<span class="cloud-note">Cloud copies are removed by retention only</span>
 						{/if}
 					</div>
 				</div>
@@ -210,6 +235,33 @@
 
 	.who {
 		min-width: 0;
+	}
+
+	.titled {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.badge {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		height: 20px;
+		padding: 0 7px;
+		border-radius: 5px;
+		background: var(--chip-on);
+		color: #9aa0a8;
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		white-space: nowrap;
+	}
+
+	.badge.remote {
+		background: var(--view-bg);
+		color: var(--view-fg);
 	}
 
 	.name {
@@ -406,5 +458,19 @@
 		border-radius: 9px;
 		color: var(--danger);
 		font-size: 11px;
+	}
+
+	.cloud-note {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		height: 46px;
+		max-width: 190px;
+		padding: 0 12px;
+		border: 1px dashed var(--view-line);
+		border-radius: 9px;
+		color: var(--view-dim);
+		font-size: 10px;
+		line-height: 1.4;
 	}
 </style>
