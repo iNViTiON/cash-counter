@@ -1,3 +1,5 @@
+import type { CloudLink } from './cloud.svelte';
+import { cloudConfigured, defaultCloud, readCloud, writeCloud } from './cloudcfg';
 import { available } from './db';
 import { CENTS, dmy, money } from './format';
 import { migrate } from './migrate';
@@ -18,6 +20,7 @@ import type { EncodedPhoto } from './photo';
 import type {
 	Cam,
 	Cfg,
+	CloudCfg,
 	Gate,
 	GateKind,
 	GateStep,
@@ -100,6 +103,19 @@ class CashCounter {
 	usage = $state<StorageInfo | null>(null);
 	/** Set when this browser refuses IndexedDB outright; counting still works. */
 	storageErr = $state<string | null>(null);
+	/**
+	 * The cloud engine, or null. Loaded by dynamic import and only when
+	 * credentials exist, so an unconfigured device never evaluates a byte of it.
+	 * Components read `app.link?.…` and get `undefined` cleanly when it is off.
+	 */
+	link = $state<CloudLink | null>(null);
+	/**
+	 * Non-secret cloud settings. Lives here rather than on `link` so the settings
+	 * card can be filled in *before* there is an engine to load — and so an
+	 * unconfigured device still reads it synchronously, from localStorage, with
+	 * no cloud module in the bundle graph.
+	 */
+	cloudCfg = $state<CloudCfg>(defaultCloud());
 
 	/* ---------- lock ---------- */
 	lock = $state<Lock>({ pin: '' });
@@ -211,6 +227,12 @@ class CashCounter {
 		// cannot type, which would lock the user out of their own slots.
 		const lock = read<Partial<Lock> | null>(K.lock, null);
 		this.lock = { pin: String(lock?.pin ?? '').replace(/\D/g, '').slice(0, PIN_MAX) };
+
+		this.cloudCfg = readCloud();
+	}
+
+	persistCloud(): void {
+		writeCloud($state.snapshot(this.cloudCfg));
 	}
 
 	/**
@@ -236,12 +258,45 @@ class CashCounter {
 				this.saveWorkspace();
 			}
 			void sweepOrphans(slots.map((s) => s.id));
+			void this.startCloud();
 		} catch {
 			this.storageErr = 'This browser is blocking local storage — photos cannot be saved';
 		} finally {
 			this.ready = true;
 		}
 		void this.refreshStorage();
+	}
+
+	/**
+	 * Brings the cloud engine in, if and only if this device is configured for
+	 * it. A dynamic import means an unconfigured device runs no cloud code at
+	 * all, and keeps `state` free of a static edge to a module that imports it
+	 * back. The chunk is still precached by workbox, so it works offline once on.
+	 */
+	async startCloud(): Promise<void> {
+		if (this.link) return;
+		if (!cloudConfigured()) return;
+		const m = await import('./cloud.svelte');
+		this.link = m.link;
+		m.link.start();
+	}
+
+	/** Turning sync on for the first time has to load the engine there and then. */
+	async enableCloud(): Promise<void> {
+		await this.startCloud();
+	}
+
+	/** Records that a slot reached the bucket. Failure here just means a re-upload. */
+	async markSynced(id: string, at: number): Promise<void> {
+		const slot = this.slots.find((s) => s.id === id);
+		if (!slot) return;
+		const next = { ...$state.snapshot(slot), syncedAt: at };
+		try {
+			await saveSlot(next, null, []);
+			slot.syncedAt = at;
+		} catch {
+			/* it stays pending and goes up again next run */
+		}
 	}
 
 	/** Claims persistence and reads the quota. Never blocks anything. */
@@ -257,6 +312,9 @@ class CashCounter {
 		clearTimeout(this.#toastTimer);
 		clearTimeout(this.#lockTimer);
 		this.unlockedUntil = 0;
+		// Nothing to flush: the upload queue derives from persisted slots, so an
+		// interrupted run simply resumes next launch.
+		this.link?.stop();
 	}
 
 	/* ---------- persistence ---------- */
@@ -337,6 +395,11 @@ class CashCounter {
 
 	persistLock(): void {
 		this.#write(K.lock, $state.snapshot(this.lock));
+		// Published so a viewer device can check it. Plaintext, matching the local
+		// decision — and worth being blunt about: the bucket's read key is a
+		// superset of the PIN, so anyone who can see the counts could already
+		// have read it from there.
+		void this.link?.publishLock(this.lock.pin);
 	}
 
 	/**
@@ -632,6 +695,10 @@ class CashCounter {
 		this.photoBlob = null;
 		void saveWsPhoto(null);
 		this.saveWorkspace();
+		// Fire and forget, after the return-path work is done. `#commit` stays
+		// synchronous from the caller's point of view and this is not on the
+		// PHOTO -> openSysCam -> .click() chain.
+		void this.link?.kick();
 		return slot;
 	}
 
@@ -640,9 +707,19 @@ class CashCounter {
 		const s = this.openSlot;
 		if (!s) return;
 		// Read before the await: `openSlot` follows `openId`, which is cleared below.
-		const qty = { ...s.qty };
+		await this.loadCounts({ ...s.qty });
+	}
+
+	/**
+	 * Copies quantities into the working count. Safe from an archive row as well
+	 * as a local slot — it reads numbers and writes the workspace, and touches
+	 * neither the slot store nor anything remote.
+	 */
+	async loadCounts(qty: Qty): Promise<void> {
+		if (this.#notReady()) return;
+		const next = { ...qty };
 		await this.#retire();
-		this.qty = qty;
+		this.qty = next;
 		this.view = null;
 		this.openId = null;
 		this.saveWorkspace();
@@ -668,8 +745,13 @@ class CashCounter {
 
 	async #removeSlot(id: string | null): Promise<boolean> {
 		if (!id) return false;
+		// The cloud copy survives a local delete — but only if there is one. A slot
+		// saved offline and deleted before it ever went up has nothing up there,
+		// and the user should hear that rather than assume a backup exists.
+		const orphaned = Boolean(this.link?.ready && !this.slots.find((s) => s.id === id)?.syncedAt);
 		if (!(await this.#save(() => dropSlots([id])))) return false;
 		this.slots = this.slots.filter((s) => s.id !== id);
+		if (orphaned) this.say('Deleted before backup — no cloud copy');
 		return true;
 	}
 

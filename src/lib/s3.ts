@@ -56,11 +56,17 @@ const PUT_TIMEOUT_MS = 20_000;
 const META_TIMEOUT_MS = 10_000;
 
 /**
- * Set when a response's `Date` header disagrees with this device by more than
- * five minutes. An out-of-sync clock is a 403 that looks exactly like a bad
- * key, and it is the single most confusing way this feature can fail.
+ * Milliseconds the bucket's clock is ahead of this device's, from the last
+ * response that carried a `Date` header. An out-of-sync clock produces a 403
+ * that looks exactly like a bad key, which is the single most confusing way
+ * this feature can fail — hence a free diagnostic on every request.
+ *
+ * `Date` is not a CORS-safelisted response header, so this stays 0 until the
+ * user's bucket policy lists it in `ExposeHeaders`.
  */
-export let clockSkewMs = 0;
+let skew = 0;
+
+export const clockSkew = (): number => skew;
 
 function target(t: S3Target, key: string): { host: string; path: string } {
 	const host = new URL(t.endpoint).host;
@@ -91,7 +97,7 @@ function noteSkew(res: Response): void {
 	const served = res.headers.get('Date');
 	if (!served) return;
 	const drift = Date.parse(served) - Date.now();
-	clockSkewMs = Number.isFinite(drift) ? drift : 0;
+	skew = Number.isFinite(drift) ? drift : 0;
 }
 
 async function classify(res: Response): Promise<S3Error> {

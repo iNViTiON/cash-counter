@@ -4,6 +4,7 @@
 	import CameraPick from '$lib/components/CameraPick.svelte';
 	import DenomList from '$lib/components/DenomList.svelte';
 	import Keypad from '$lib/components/Keypad.svelte';
+	import Archive from '$lib/components/Archive.svelte';
 	import PhotoRequired from '$lib/components/PhotoRequired.svelte';
 	import PinGate from '$lib/components/PinGate.svelte';
 	import SaveBar from '$lib/components/SaveBar.svelte';
@@ -55,6 +56,28 @@
 			);
 		}
 	}
+
+	/**
+	 * The archive detail. A cloud-only row has no local `Slot`, so one is built
+	 * from the cached index — it is display data only and never reaches storage.
+	 */
+	const archRow = $derived(app.link?.merged.find((r) => r.id === app.openId) ?? null);
+	const archSlot = $derived(
+		archRow
+			? (archRow.local ?? {
+					id: archRow.id,
+					label: archRow.label,
+					date: archRow.date,
+					ts: archRow.ts,
+					total: archRow.total,
+					qty: archRow.cloud?.qty ?? {},
+					photo: archRow.cloud?.photoKey ? { bytes: 0, w: 0, h: 0 } : null,
+					updatedAt: archRow.ts
+				})
+			: null
+	);
+	const cloudPhoto = (): Promise<Blob | null> =>
+		archRow?.cloud ? (app.link?.cloudPhoto(archRow.cloud) ?? Promise.resolve(null)) : Promise.resolve(null);
 
 	onMount(() => {
 		app.hydrate();
@@ -125,6 +148,18 @@
 			<SlotDetail />
 		{/if}
 
+		<!-- Inside `.mid`, not in the full-screen Archive shell: SlotDetail's photo
+		     placement measures against midW/midH and its overlay is absolute
+		     against `.mid`. A fixed shell would size it against the wrong box. -->
+		{#if app.view === 'archslot' && archRow}
+			<SlotDetail
+				slot={archSlot}
+				where={archRow.where}
+				readonly={!archRow.local}
+				photoSrc={archRow.local ? null : cloudPhoto}
+			/>
+		{/if}
+
 		{#if app.view === 'camera'}
 			<Camera />
 		{/if}
@@ -134,6 +169,10 @@
 
 	{#if app.view === 'settings'}
 		<Settings />
+	{/if}
+
+	{#if app.view === 'archive'}
+		<Archive />
 	{/if}
 
 	{#if app.view === 'campick'}

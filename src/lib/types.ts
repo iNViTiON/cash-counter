@@ -25,7 +25,21 @@ export type PadKey =
 	| 'hide';
 export type PadSide = 'left' | 'right';
 export type SaveDay = 'today' | 'yesterday';
-export type View = null | 'slot' | 'camera' | 'settings' | 'campick' | 'needphoto';
+/**
+ * `archive` is a full-screen list; `archslot` is its detail, and it mounts
+ * inside `.mid` like `slot` does — `SlotDetail`'s photo placement measures
+ * against `midW`/`midH` and its overlay is absolute against `.mid`, so putting
+ * it inside a fixed full-screen shell would compute against the wrong box.
+ */
+export type View =
+	| null
+	| 'slot'
+	| 'camera'
+	| 'settings'
+	| 'campick'
+	| 'needphoto'
+	| 'archive'
+	| 'archslot';
 export type MaxAge = 7 | 31;
 export type PadSize = 25 | 50 | 75 | 100;
 /** Where a photo comes from: the phone's own camera app, or the in-app overlay. */
@@ -56,8 +70,14 @@ export interface Slot {
 	total: number;
 	qty: Qty;
 	photo: PhotoMeta | null;
-	/** Last local change. Nothing reads it yet; cloud sync compares on it. */
+	/** Last local change. Cloud sync compares on it. */
 	updatedAt: number;
+	/**
+	 * When this slot reached the bucket. Unset means pending — the upload queue
+	 * is derived from this, so there is no second persisted structure to keep in
+	 * step and no way for an outbox entry to hold a stale copy of a photo.
+	 */
+	syncedAt?: number;
 }
 
 /**
@@ -86,6 +106,73 @@ export interface Gate {
 	/** Sentence naming what is about to happen: "Delete every saved slot". */
 	why: string;
 	step: GateStep;
+}
+
+export type CloudRole = 'writer' | 'viewer';
+export type CloudStatus = 'off' | 'idle' | 'busy' | 'offline' | 'error';
+
+/**
+ * Non-secret cloud settings (`ec.cloud`). Kept apart from `Cfg` so an
+ * unconfigured device's settings path is byte-identical to before, and kept
+ * apart from the credentials so this still renders while the PIN gate is shut.
+ */
+export interface CloudCfg {
+	v: 1;
+	on: boolean;
+	endpoint: string;
+	bucket: string;
+	region: string;
+	style: 'path' | 'vhost';
+	/** Optional key prefix, so one bucket can hold more than one site. */
+	prefix: string;
+	/** Cloud retention, independent of `cfg.maxAge`. */
+	cloudAge: MaxAge;
+	role: CloudRole;
+	deviceId: string;
+	/**
+	 * Only slots saved at or after this instant are queued automatically. Stamped
+	 * when sync is switched on, so pasting credentials does not immediately push
+	 * every existing slot over cellular. "Back up existing slots" sets it to 0.
+	 */
+	syncFrom: number;
+	lastSyncAt: number;
+	lastPruneAt: number;
+	lastGcAt: number;
+}
+
+/** Kept under its own key so encrypting it later touches exactly one module. */
+export interface CloudKey {
+	accessKeyId: string;
+	secretAccessKey: string;
+}
+
+/** One slot as it exists in the bucket. `ts`/`id` come free from the object key. */
+export interface CloudEntry {
+	id: string;
+	ts: number;
+	key: string;
+	label?: string;
+	date?: string;
+	total?: number;
+	/** Cached so LOAD COUNTS works on a cloud-only row without a fetch. */
+	qty?: Qty;
+	photoKey?: string;
+	/** `pending` until the JSON body has been fetched. */
+	meta: 'pending' | 'ok' | 'failed';
+}
+
+export type Where = 'local' | 'cloud' | 'both';
+
+/** A row in the merged archive: local slots and cloud objects, matched on id. */
+export interface ArchiveRow {
+	id: string;
+	ts: number;
+	label: string;
+	date: string;
+	total: number;
+	where: Where;
+	local: Slot | null;
+	cloud: CloudEntry | null;
 }
 
 /** Record-shape version and one-time migration state, stored in `kv` under `meta`. */

@@ -21,6 +21,13 @@
 		</button>
 	{/if}
 
+	<!-- Conditional, so the bar is byte-identical on an unconfigured device. -->
+	{#if app.link?.ready}
+		<button type="button" class="btn icon" title="Archive" onclick={() => (app.view = 'archive')}>
+			☁
+		</button>
+	{/if}
+
 	<button
 		type="button"
 		class="btn icon"

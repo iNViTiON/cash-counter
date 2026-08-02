@@ -87,7 +87,46 @@ the original bytes straight through when they already fit. It asks for
 `imageOrientation: 'from-image'` explicitly, because `<img>` always applies EXIF
 and `createImageBitmap`'s default has varied by engine.
 
-**Offline is a hard requirement**: every feature must work with no network.
+**Cloud backup is bring-your-own-bucket, with no server of ours.** The browser
+signs SigV4 itself (`src/lib/sigv4.ts`) and talks to an S3-compatible bucket
+directly. Presigned query params, not an `Authorization` header — the reason
+that decides it is that only `host` gets signed, so the browser is free to add
+`Origin`, `Referer` and `sec-fetch-*` without breaking the signature.
+`bun run check:sigv4` diffs the signer against bun's native presigner and must
+stay at 74/74.
+
+Object layout, and the reasoning that is easy to undo by accident:
+
+- `slots/<13-digit inverted ts>_<uuid>.json` and `photos/<uuid>.jpg`. Listings
+  are ascending-only, so inverting the timestamp makes "newest N" a `max-keys`
+  and "everything expired" one `start-after` range.
+- **Keys carry nothing user-typed.** A key is immutable, so anything encoded
+  there is frozen at write time.
+- **Upload photo first, then JSON. Delete JSON first, then photo.** The JSON is
+  the commit record either way: a crash must leave a collectable orphan, never a
+  slot pointing at evidence that is gone.
+- `s3List` returns every page or throws, never a partial. Orphan GC subtracts
+  one listing from another, so a silently short listing there deletes live
+  evidence. GC is additionally all-or-nothing and has a ratio fuse.
+- The UI never deletes cloud objects; only the cloud retention window does. That
+  is what makes this a backup rather than a mirror — but it is a **UI policy,
+  not a token restriction**: the writer's token must have `DeleteObject` or
+  retention cannot run.
+
+`src/lib/cloud.svelte.ts` is loaded by dynamic import and only when credentials
+exist, so an unconfigured device evaluates none of it — no fetch, no timer, no
+listener. The upload queue is `$derived` from `Slot.syncedAt`, never stored, so
+there is no outbox to keep in step and no way for one to hold a stale copy of a
+photo. `CloudCfg.syncFrom` is stamped when sync is switched on so that pasting
+credentials does not immediately push every existing slot over cellular.
+
+**A background sync failure must never toast.** It fires right after `#commit`,
+where it would paint over the "Saved · …" the user needs to see. Only a run the
+user asked for passes `loud`. The failure still lands in `status`/`lastError`,
+which the settings card renders.
+
+**Offline is a hard requirement** for counting and saving: those must work with
+no network, and sync is strictly additive on top. Sync never blocks a save.
 Nothing may be fetched at runtime. Fonts are self-hosted in `static/fonts/` for
 this reason — a Google Fonts `<link>` would break the first offline load. Any new
 asset type must be added to `workbox.globPatterns` in `vite.config.ts` or it

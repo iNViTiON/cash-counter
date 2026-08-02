@@ -2,6 +2,7 @@
 	import { bytes, CENTS, denomLabel, dmy, hm, money } from '$lib/format';
 	import { app } from '$lib/state.svelte';
 	import type { PadSize, PhotoMax } from '$lib/types';
+	import CloudCard from './CloudCard.svelte';
 	import SettingsPin from './SettingsPin.svelte';
 
 	const PAD_SIZES: Array<[string, PadSize]> = [
@@ -278,6 +279,8 @@
 			</section>
 
 			<SettingsPin />
+
+			<CloudCard />
 
 			<section class="card">
 				<div class="head">
