@@ -87,8 +87,7 @@ export interface Lock {
 	pin: string;
 }
 
-/** `source` is another machine's PIN, checked against its published lock file. */
-export type GateKind = 'unlock' | 'set' | 'change' | 'clear' | 'source';
+export type GateKind = 'unlock' | 'set' | 'change' | 'clear';
 export type GateStep = 'verify' | 'new' | 'confirm';
 
 /**
@@ -103,8 +102,6 @@ export interface Gate {
 	/** Sentence naming what is about to happen: "Delete every saved slot". */
 	why: string;
 	step: GateStep;
-	/** Profile name, for `kind: 'source'` only. */
-	who?: string;
 }
 
 /**
@@ -128,14 +125,6 @@ export interface Remote {
 	accessKeyId: string;
 	secretAccessKey: string;
 	addedAt: number;
-}
-
-/** What the owning device publishes so a viewer can check a PIN. */
-export interface LockDoc {
-	v: 1;
-	/** Plaintext, matching the local decision. Empty means no PIN is set. */
-	pin: string;
-	ts: number;
 }
 
 export type CloudRole = 'writer' | 'viewer';

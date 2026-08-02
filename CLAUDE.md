@@ -163,14 +163,18 @@ keeps a byte-identical settings blob.
   future branch to ignore it. What it cannot enforce: whoever holds a viewer
   profile holds a bucket credential and can use it with curl. The real control is
   the token's scope, and the real revocation is rotating it on the source machine.
-- **Two different PINs.** `app.lock.pin` is this device's. A source machine's PIN
-  is read from its `meta/lock.json`, held in a local `const` for the length of
-  `openRemote`, and discarded — never `$state`, never storage, never a profile.
-  It gates the screen only, and the bucket's read key is a superset of it.
-- Clearing a PIN writes `{"pin":""}` rather than deleting the object: deleting
-  needs a scope the owner may not have, and it would collapse "no PIN set" and
-  "this key cannot read meta/" into the same 404. Entry refuses on 403 and on
-  network failure rather than failing open.
+- **Browsing a profile asks for no PIN, and there is only one PIN in the app.**
+  There used to be two: the source machine published its own to
+  `meta/lock.json` and `openRemote` checked it before listing. Both halves are
+  gone, and the reasoning is worth keeping so it is not rebuilt. It protected
+  nothing — whoever can reach that screen already holds the bucket's key and can
+  read every object with curl, and the PIN sat *in the bucket that key opens*, so
+  the check was a lock with its key taped to it. It cost something real — a
+  plaintext PIN written into the user's bucket, and a read-only glance at another
+  till's numbers made the most guarded action in the app. Adding or removing a
+  profile is still gated, because handing out a bucket credential is the part
+  worth guarding. A bucket written by an older build still holds `meta/lock.json`;
+  it is inert and worth deleting from the console.
 - `ec.cloud.key` is this device's read-write pair for its own bucket;
   `ec.remotes` holds read-only keys for other machines'. The viewer path never
   reads the former and the sync path never reads the latter.

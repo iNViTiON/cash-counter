@@ -15,7 +15,7 @@
  * persistence path can write it to this device's store.
  */
 
-import { remoteFill, remoteIndex, remoteLock, remotePhoto } from './remote';
+import { remoteFill, remoteIndex, remotePhoto } from './remote';
 import { releaseRemotePhotos, remoteUrl } from './remotePhoto';
 import type { CloudEntry, Remote } from './types';
 
@@ -30,7 +30,7 @@ export class Viewer {
 	 */
 	active = $state<Remote | null>(null);
 	entries = $state<CloudEntry[]>([]);
-	status = $state<'idle' | 'auth' | 'loading' | 'ready' | 'error'>('idle');
+	status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
 	error = $state('');
 
 	/** Back to this device's own bucket. */
@@ -40,24 +40,6 @@ export class Viewer {
 		this.status = 'idle';
 		this.error = '';
 		releaseRemotePhotos();
-	}
-
-	/**
-	 * Checks the source machine's PIN, then lists its bucket.
-	 *
-	 * Refuses on 403 and on a network failure rather than failing open: a
-	 * viewer that shrugs and shows the data when it cannot verify is worse than
-	 * one that does not check at all, because it implies a check happened.
-	 *
-	 * Returns the source PIN when one is set, so the caller can prompt. The PIN
-	 * is handed back as a return value and never stored — the only PIN this
-	 * device keeps is its own `app.lock.pin`.
-	 */
-	async requiredPin(r: Remote): Promise<string | null> {
-		this.status = 'auth';
-		this.error = '';
-		const doc = await remoteLock(r);
-		return doc?.pin ? doc.pin : null;
 	}
 
 	/**

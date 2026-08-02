@@ -451,45 +451,30 @@ class CashCounter {
 	/**
 	 * Points the slot strip at another machine's bucket, read-only.
 	 *
-	 * The source machine's PIN is held in a local `const` for the length of this
-	 * call and discarded. It is never assigned to `$state`, never written to
-	 * storage, never put in a profile — the only PIN this device keeps is
-	 * `app.lock.pin`.
+	 * **No PIN.** There used to be one: the source machine published its PIN to
+	 * `meta/lock.json` and this prompted for it before listing. It was dropped
+	 * because it protected nothing and cost something. Nothing: whoever can open
+	 * this screen already holds that bucket's key and can read every object with
+	 * curl, and the PIN itself sat in the same bucket that key opens — so the
+	 * "check" was a lock whose key was taped to it. Something: it put a plaintext
+	 * PIN in the bucket, and it made a read-only glance at another till's numbers
+	 * the most guarded action in the app.
+	 *
+	 * The real control is the token's scope, and the real revocation is rotating
+	 * it on the source machine. Adding a profile is still gated — handing out a
+	 * bucket credential is the thing worth guarding.
 	 */
 	async openRemote(id: string): Promise<void> {
 		const profile = this.remotes.find((p) => p.id === id);
 		if (!profile) return;
 		const m = await import('./viewer.svelte');
 		this.viewer = m.viewer;
-
-		let sourcePin: string | null;
-		try {
-			sourcePin = await m.viewer.requiredPin(profile);
-		} catch (e) {
-			// Refuse on 403 or a network failure rather than failing open: showing
-			// the data when the check could not run implies a check that did not
-			// happen. A 403 specifically means the key cannot read `meta/`.
-			m.viewer.status = 'error';
-			m.viewer.error =
-				e && typeof e === 'object' && 'kind' in e && e.kind === 'auth'
-					? 'That key cannot read meta/lock.json — check its scope'
-					: e instanceof Error
-						? e.message
-						: 'Could not reach that bucket';
-			this.say(m.viewer.error);
-			return;
-		}
-
-		const enter = (): void => {
-			this.openId = null;
-			this.view = null;
-			this.cloudCfg.lastProfile = profile.id;
-			this.persistCloud();
-			void m.viewer.open(profile);
-			this.say(`Viewing ${profile.name} · read-only`);
-		};
-		if (!sourcePin) return enter();
-		this.#askSourcePin(profile.name, sourcePin, enter);
+		this.openId = null;
+		this.view = null;
+		this.cloudCfg.lastProfile = profile.id;
+		this.persistCloud();
+		void m.viewer.open(profile);
+		this.say(`Viewing ${profile.name} · read-only`);
 	}
 
 	/**
@@ -683,13 +668,13 @@ class CashCounter {
 
 	/* ---------- lock ---------- */
 
+	/**
+	 * This device only. The PIN is no longer published to the bucket — nothing
+	 * reads it since viewing stopped asking, and writing it there put a plaintext
+	 * PIN in a place every holder of the bucket's read key can see.
+	 */
 	persistLock(): void {
 		this.#write(K.lock, $state.snapshot(this.lock));
-		// Published so a viewer device can check it. Plaintext, matching the local
-		// decision — and worth being blunt about: the bucket's read key is a
-		// superset of the PIN, so anyone who can see the counts could already
-		// have read it from there.
-		void this.link?.publishLock(this.lock.pin);
 	}
 
 	/**
@@ -715,7 +700,20 @@ class CashCounter {
 		this.pinEntry = '';
 		this.pinErr = '';
 		this.pinTries = 0;
+		this.#dropFocus();
 		this.gate = { kind: 'unlock', why, step: 'verify' };
+	}
+
+	/**
+	 * Nothing may hold focus while the sheet is up.
+	 *
+	 * PinGate reads the keyboard from a window listener, which fires whatever has
+	 * focus — so a settings text field left focused behind the scrim would receive
+	 * the same digits the PIN does. Same move as `setMode('pad')` makes for the
+	 * same reason, and it also keeps a soft keyboard from being up behind the sheet.
+	 */
+	#dropFocus(): void {
+		if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 	}
 
 	/**
@@ -727,8 +725,6 @@ class CashCounter {
 		this.gate = null;
 		this.#pending = null;
 		this.#draft = '';
-		// The other machine's PIN does not outlive the sheet that asked for it.
-		this.#sourcePin = '';
 		this.pinEntry = '';
 		this.pinErr = '';
 		this.pinTries = 0;
@@ -765,6 +761,7 @@ class CashCounter {
 
 	#openGate(kind: GateKind, why: string, step: GateStep): void {
 		this.#closeGate();
+		this.#dropFocus();
 		this.gate = { kind, why, step };
 	}
 
@@ -794,38 +791,13 @@ class CashCounter {
 		this.#closeGate();
 	}
 
-	/**
-	 * Prompts for ANOTHER machine's PIN. `expected` stays a parameter and a
-	 * closure variable — it is never stored, and `this.lock.pin` is untouched.
-	 * This gates the screen only; whoever holds the profile already holds a
-	 * bucket credential and could have read this PIN out of the bucket.
-	 */
-	#askSourcePin(who: string, expected: string, job: () => void): void {
-		this.#closeGate();
-		this.#sourcePin = expected;
-		this.#pending = job;
-		this.gate = { kind: 'source', why: `Unlock "${who}"`, step: 'verify', who };
-	}
-
-	#sourcePin = '';
-
 	pinSubmit(): void {
 		const g = this.gate;
 		if (!g) return;
 		const entry = this.pinEntry;
-
-		if (g.kind === 'source') {
-			if (entry !== this.#sourcePin) {
-				this.pinEntry = '';
-				this.pinTries += 1;
-				this.pinErr = 'Wrong PIN';
-				return;
-			}
-			const job = this.#pending;
-			this.#closeGate();
-			void job?.();
-			return;
-		}
+		// Nothing to check yet — Enter on an empty pad is a stray keystroke, not
+		// a wrong PIN, and counting it as one would burn a try and clear nothing.
+		if (!entry) return;
 
 		if (g.step === 'verify') {
 			if (entry !== this.lock.pin) {

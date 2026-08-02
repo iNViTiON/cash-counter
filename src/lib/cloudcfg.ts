@@ -50,7 +50,13 @@ export const slotKey = (prefix: string, ts: number, id: string): string =>
 
 export const photoKey = (prefix: string, id: string): string => `${prefix}photos/${id}.jpg`;
 
-export const LOCK_KEY = (prefix: string): string => `${prefix}meta/lock.json`;
+/*
+ * There is no `meta/lock.json` key any more. The admin PIN used to be published
+ * there so a viewer device could check it; browsing a profile no longer asks,
+ * and a plaintext PIN sitting in the bucket that its own read key opens was
+ * never protection. A bucket written by an older build still holds the object —
+ * inert, and worth deleting from the console.
+ */
 
 const SLOT_RE = /slots\/(\d{13})_([0-9a-f-]{36})\.json$/;
 

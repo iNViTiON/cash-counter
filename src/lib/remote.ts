@@ -13,10 +13,10 @@
  * that token on the source machine.
  */
 
-import { LOCK_KEY, parseSlotKey, photoKey } from './cloudcfg';
+import { parseSlotKey, photoKey } from './cloudcfg';
 import { s3Get, s3GetJson, s3List } from './s3';
 import type { S3Target } from './s3';
-import type { CloudEntry, LockDoc, Qty, Remote } from './types';
+import type { CloudEntry, Qty, Remote } from './types';
 
 interface RemoteSlotBody {
 	v: 1;
@@ -38,25 +38,6 @@ export function remoteTarget(r: Remote): S3Target {
 		accessKeyId: r.accessKeyId,
 		secretAccessKey: r.secretAccessKey
 	};
-}
-
-/**
- * Reads the source machine's published PIN.
- *
- * Returns `null` when there is no lock document at all — either the machine
- * never set a PIN, or it cleared one. That is why clearing a PIN writes
- * `{"pin":""}` rather than deleting the object: deleting needs a scope the
- * owner may not have granted itself, and it would collapse "no PIN" and
- * "cannot read meta/" into the same answer. A 403 must stay distinguishable,
- * so it is rethrown rather than swallowed.
- */
-export async function remoteLock(r: Remote): Promise<LockDoc | null> {
-	try {
-		return await s3GetJson<LockDoc>(remoteTarget(r), LOCK_KEY(r.prefix));
-	} catch (e) {
-		if (e && typeof e === 'object' && 'kind' in e && e.kind === 'missing') return null;
-		throw e;
-	}
 }
 
 /** Everything in the other machine's bucket, newest first. */

@@ -14,7 +14,6 @@
 import {
 	cloudReady,
 	inv,
-	LOCK_KEY,
 	parseSlotKey,
 	photoKey,
 	readIndex,
@@ -449,19 +448,14 @@ export class CloudLink {
 		}
 	}
 
-	/** Publishes the PIN so a viewer device can check it. See CLAUDE.md. */
-	async publishLock(pin: string): Promise<void> {
-		const t = this.target;
-		if (!t || this.cfg.role !== 'writer') return;
-		const body = new Blob([JSON.stringify({ v: 1, pin, ts: Date.now() })], {
-			type: 'application/json'
-		});
-		try {
-			await s3Put(t, LOCK_KEY(this.cfg.prefix), body);
-		} catch {
-			/* the PIN still works locally; the viewer check is the only casualty */
-		}
-	}
+	/*
+	 * `publishLock` used to live here, writing the admin PIN to `meta/lock.json`
+	 * so a viewer device could check it before listing. Both halves are gone:
+	 * browsing a profile no longer asks, so nothing read it, and writing a
+	 * plaintext PIN into the bucket every holder of the read key can open was
+	 * never worth what it bought. A bucket set up by an older build may still
+	 * hold that object — it is inert, and worth deleting from the console.
+	 */
 }
 
 export const link = new CloudLink();

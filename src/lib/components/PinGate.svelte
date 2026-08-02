@@ -17,22 +17,50 @@
 	};
 
 	const gate = $derived(app.gate);
-	const title = $derived(
-		gate ? (gate.kind === 'source' ? `PIN FOR “${gate.who}”` : (TITLES[gate.kind] ?? 'ADMIN PIN')) : ''
-	);
+	const title = $derived(gate ? (TITLES[gate.kind] ?? 'ADMIN PIN') : '');
 	const step = $derived(
-		gate?.kind === 'source'
-			? "This is the other machine's admin PIN, not this device's. It unlocks this screen only — it does not protect the bucket."
-			: gate?.step === 'new'
-				? `Enter a new PIN — ${PIN_MIN} to 8 digits.`
-				: gate?.step === 'confirm'
-					? 'Enter it once more to confirm.'
-					: gate?.kind === 'unlock'
-						? 'Enter the PIN to continue.'
-						: 'Enter the current PIN.'
+		gate?.step === 'new'
+			? `Enter a new PIN — ${PIN_MIN} to 8 digits.`
+			: gate?.step === 'confirm'
+				? 'Enter it once more to confirm.'
+				: gate?.kind === 'unlock'
+					? 'Enter the PIN to continue.'
+					: 'Enter the current PIN.'
 	);
 	const warn = $derived(gate?.kind === 'set' || gate?.kind === 'change');
+
+	/**
+	 * A physical keyboard types straight into the sheet.
+	 *
+	 * There is deliberately no `<input>` behind this. An input is what would make
+	 * it work "for free", and it is exactly what must not exist: focusing one on a
+	 * `position: fixed` scrim raises the iOS soft keyboard and reflows the viewport
+	 * out from under the sheet — the same fight `readonly={app.padOpen}` and
+	 * `setMode('pad')`'s blur are already having. A window-level `keydown` gets
+	 * desktop entry with no focusable field, no soft keyboard, and nothing for the
+	 * SYS/PAD toggle to interact with.
+	 *
+	 * Modifier chords are skipped so Ctrl-R and friends still reach the browser.
+	 */
+	function onKey(e: KeyboardEvent): void {
+		if (!app.gate || e.ctrlKey || e.metaKey || e.altKey) return;
+		if (e.key >= '0' && e.key <= '9') {
+			e.preventDefault();
+			app.pinKey(e.key);
+		} else if (e.key === 'Backspace') {
+			e.preventDefault();
+			app.pinDel();
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			app.pinSubmit();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			app.pinCancel();
+		}
+	}
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 {#if gate}
 	<div class="scrim">
@@ -54,16 +82,15 @@
 			{/if}
 
 			<!--
-				Slots, not one dot per keypress: an empty outline says how many digits
-				are still expected, where a lone filled dot says nothing. The row grows
-				past the minimum for a longer PIN — this app allows 4 to 8, and a fixed
-				four would make an existing six-digit PIN look wrong as it was typed.
+				One dot per digit typed, and no empty slots behind them. Placeholders
+				would have to claim a length, and this PIN has no fixed one — four
+				outlines in front of a six-digit PIN says "two too many" on every entry.
 
 				Fixed height so the sheet never jumps as digits go in or errors appear.
 			-->
 			<div class="dots">
-				{#each Array(Math.max(PIN_MIN, app.pinEntry.length)) as _, i (i)}
-					<span class="dot" class:filled={i < app.pinEntry.length}></span>
+				{#each app.pinEntry.split('') as _, i (i)}
+					<span class="dot"></span>
 				{/each}
 			</div>
 			<div class="err">
@@ -129,13 +156,8 @@
 	.dot {
 		width: 13px;
 		height: 13px;
-		border: 1px solid #3a3e45;
 		border-radius: 50%;
-	}
-
-	.dot.filled {
 		background: var(--acc);
-		border-color: var(--acc);
 	}
 
 	.err {

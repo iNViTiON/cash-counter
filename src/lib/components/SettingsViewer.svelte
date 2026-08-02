@@ -193,8 +193,10 @@
 
 	<div class="hint note">
 		A profile is a key to another machine's bucket. Anyone who has it can read that machine's counts
-		and photos with any S3 tool — this app's read-only browsing is a convenience, not a lock. To
-		take access away you <b>rotate the token on the source machine</b>; changing a PIN does nothing.
+		and photos with any S3 tool — this app's read-only browsing is a convenience, not a lock, and
+		browsing one asks for no PIN. To take access away you
+		<b>rotate the token on the source machine</b>. Adding and removing a profile is what the PIN
+		guards, because that is what hands the key out.
 	</div>
 </section>
 

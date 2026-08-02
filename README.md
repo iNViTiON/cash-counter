@@ -156,8 +156,8 @@ and using the quick slot — all after `fetch()` to the origin started throwing.
   has dropped it.
 - **Cloud profiles** point the strip at another machine's bucket, read-only. Give
   them an **Object Read only** token. Handing someone a profile hands them that
-  bucket's data until you rotate the token — the PIN check gates this app's
-  screen, not the bucket. While a profile is open **SAVE is off**, because a
+  bucket's data until you rotate the token — that is the only control, and no PIN
+  is asked for to browse one. While a profile is open **SAVE is off**, because a
   count saved there would file into a list you are not looking at; counting,
   CLEAR and PHOTO carry on, and switching back to THIS DEVICE restores saving.
   Settings chooses which profile the app opens on.
