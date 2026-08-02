@@ -42,7 +42,9 @@
 
 		<div class="grid" style:grid-auto-rows={`${app.padRow}px`} style:max-width={`${gridWidth}px`}>
 			{#each KEYS as key (key.k)}
-				<button type="button" class={key.kind} onclick={() => app.press(key.k)}>{key.t}</button>
+				<button type="button" class="pad-key {key.kind}" onclick={() => app.press(key.k)}>
+					{key.t}
+				</button>
 			{/each}
 		</div>
 	</div>
@@ -98,48 +100,5 @@
 		margin: 0 auto;
 	}
 
-	button {
-		border-radius: 9px;
-		cursor: pointer;
-		font-family: var(--mono);
-		font-weight: 700;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		line-height: 1.1;
-		text-align: center;
-		padding: 2px;
-	}
-
-	button:active {
-		transform: translateY(1px);
-	}
-
-	.num {
-		background: var(--key);
-		color: var(--fg);
-		border: 1px solid var(--line-input);
-		font-size: 22px;
-	}
-
-	.act {
-		background: var(--chip);
-		color: var(--muted);
-		border: 1px solid var(--line-strong);
-		font-size: 11px;
-	}
-
-	.acc {
-		background: #2a2318;
-		color: var(--acc);
-		border: 1px solid #4a3a1c;
-		font-size: 12px;
-	}
-
-	.warn {
-		background: #241a1a;
-		color: var(--danger);
-		border: 1px solid #4a2622;
-		font-size: 12px;
-	}
+	/* Key skins live in app.css as `.pad-key` — the PIN pad needs the same ones. */
 </style>

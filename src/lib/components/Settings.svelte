@@ -264,14 +264,15 @@
 					{/each}
 				</div>
 
-				<div class="add">
+				<div class="field-row">
 					<input
+						class="field prose"
 						type="text"
 						placeholder="New label, e.g. Cash drop"
 						bind:value={app.newLabel}
 						onkeydown={labelKey}
 					/>
-					<button type="button" class="btn add-btn" onclick={() => app.addLabel()}>ADD</button>
+					<button type="button" class="btn field-btn" onclick={() => app.addLabel()}>ADD</button>
 				</div>
 			</section>
 
@@ -377,10 +378,6 @@
 		gap: 14px;
 	}
 
-	.gap {
-		margin-bottom: 11px;
-	}
-
 	.label + .hint {
 		margin-top: 4px;
 	}
@@ -407,228 +404,6 @@
 		background: var(--chip-on);
 		color: var(--fg);
 		border-color: var(--acc);
-	}
-
-	.setting {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		padding: 9px 0;
-	}
-
-	.div-bottom {
-		border-bottom: 1px solid var(--line-soft);
-	}
-
-	.div-top {
-		border-top: 1px solid var(--line-soft);
-	}
-
-	/* Reads as belonging to the setting above it, and greys out when that is off. */
-	.nested {
-		padding-left: 18px;
-		border-left: 2px solid var(--line-soft);
-	}
-
-	/* Dimmed but still tappable — the toggle explains why it does nothing. */
-	.dim {
-		opacity: 0.42;
-	}
-
-	.text {
-		flex: 1;
-		min-width: 0;
-	}
-
-	.name {
-		font-size: 13px;
-		font-weight: 600;
-		color: var(--fg);
-	}
-
-	.seg {
-		flex: 0 0 auto;
-	}
-
-	.seg button {
-		min-width: 62px;
-	}
-
-	.switch {
-		flex: 0 0 auto;
-		width: 62px;
-		height: 34px;
-		border-radius: 20px;
-		cursor: pointer;
-		position: relative;
-		padding: 0;
-		background: var(--key);
-		border: 1px solid var(--line-strong);
-	}
-
-	.switch.on {
-		background: var(--acc);
-		border-color: var(--acc);
-	}
-
-	.knob {
-		position: absolute;
-		top: 3px;
-		left: 4px;
-		width: 26px;
-		height: 26px;
-		border-radius: 50%;
-		background: var(--acc-ink);
-		transition: left 0.12s;
-	}
-
-	.switch.on .knob,
-	.switch.knob-on .knob {
-		left: 32px;
-	}
-
-	.labels {
-		display: flex;
-		flex-direction: column;
-		gap: 6px;
-	}
-
-	.label-row,
-	.slot-row {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 8px 10px;
-		border-radius: 9px;
-		background: var(--strip);
-	}
-
-	.slot-row {
-		gap: 10px;
-		padding: 9px 10px;
-	}
-
-	.label-name {
-		flex: 1;
-		min-width: 0;
-		font-size: 13px;
-		color: var(--fg);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.sample {
-		font-family: var(--mono);
-		font-size: 11px;
-		color: var(--muted-3);
-	}
-
-	.slot-name {
-		font-size: 13px;
-		color: var(--fg);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.stamp {
-		font-family: var(--mono);
-		font-size: 10px;
-		color: var(--muted-3);
-	}
-
-	.slot-total {
-		font-family: var(--mono);
-		font-size: 13px;
-		font-weight: 700;
-		color: var(--acc);
-		white-space: nowrap;
-	}
-
-	.x {
-		width: 30px;
-		height: 30px;
-		border-radius: 7px;
-		border-color: var(--line-input);
-		color: var(--danger);
-		font-size: 12px;
-		font-weight: 400;
-		letter-spacing: 0;
-		padding: 0;
-	}
-
-	.x.big {
-		width: 32px;
-		height: 32px;
-	}
-
-	.add {
-		display: flex;
-		gap: 8px;
-		margin-top: 10px;
-	}
-
-	.add input {
-		flex: 1;
-		min-width: 0;
-		height: 44px;
-		padding: 0 12px;
-		border: 1px solid var(--line-input);
-		border-radius: 9px;
-		background: var(--sunk);
-		color: var(--fg);
-		font-family: var(--sans);
-		font-size: 13px;
-		outline: none;
-	}
-
-	.add input:focus {
-		border-color: var(--acc);
-	}
-
-	.add-btn {
-		height: 44px;
-		padding: 0 16px;
-		border-radius: 9px;
-		font-size: 11px;
-	}
-
-	.head {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		margin-bottom: 11px;
-	}
-
-	.count {
-		font-family: var(--mono);
-		font-size: 11px;
-		color: var(--muted-3);
-	}
-
-	.none {
-		font-size: 12px;
-		color: var(--muted-4);
-	}
-
-	.danger-row {
-		display: flex;
-		gap: 8px;
-		margin-top: 12px;
-		flex-wrap: wrap;
-	}
-
-	.wide {
-		height: 42px;
-		padding: 0 14px;
-		border-radius: 9px;
-		font-size: 11px;
-		letter-spacing: 0.08em;
-	}
-
-	.red {
-		color: var(--danger);
 	}
 
 	.foot {
