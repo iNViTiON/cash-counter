@@ -273,15 +273,19 @@ on `main`, live at `cash.invition.dev`.
 never-cached shell/service worker). Both it and `static/_redirects` are plain
 files copied into `build/`.
 
-**`_redirects` has no catch-all, on purpose.** `/*  /index.html  200` combined
-with the immutable header on `/_app/immutable/*` caused a production outage: a
-chunk requested mid-deploy, before it had propagated, was answered with the SPA
-shell at status 200, and Cloudflare then cached that HTML under the JavaScript
-URL for a year. Every later request got HTML, `import()` rejected, and the app
-showed SvelteKit's opaque "500 Internal Error". Pages `_redirects` cannot express
-a 404, so a catch-all cannot be made to fail safely for assets — the file
-explains this at length. If real routes are ever added, scope the rewrite to
-them explicitly and never use `/*`.
+**`static/404.html` must exist.** Without it Cloudflare Pages assumes a SPA and
+answers every unmatched path with `index.html` at status 200 — including a
+hashed chunk that has not finished propagating during a deploy. `_headers` marks
+`/_app/immutable/*` immutable for a year, so the edge then caches that HTML
+under the JavaScript URL, `import()` gets HTML, and the app dies with
+SvelteKit's opaque "500 Internal Error". This happened in production on two
+separate chunks, and it recurs on every deploy because every deploy has that
+window.
+
+Emptying `_redirects` does **not** prevent it — the fallback is Pages' own
+behaviour, not a redirect rule. That was tried and changed nothing. Only the
+presence of `404.html` stops it. Deleting that file silently restores the
+outage.
 
 Recovering from a poisoned entry needs a Cloudflare **cache purge**; redeploying
 does not clear it, because the asset URL and its cache key are unchanged.
