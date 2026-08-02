@@ -120,6 +120,7 @@
 		<div class="code">{page.status}</div>
 		<div class="title">EuroCash could not start</div>
 		<div class="msg">{page.error?.message ?? 'Unknown error'}</div>
+		<div class="build">build {__BUILD__}</div>
 
 		<div class="acts">
 			<button type="button" class="btn-primary act" onclick={rescue} disabled={busy}>
@@ -189,6 +190,12 @@
 		line-height: 1.5;
 		color: var(--muted);
 		word-break: break-word;
+	}
+
+	.build {
+		font-family: var(--mono);
+		font-size: 10px;
+		color: var(--muted-4);
 	}
 
 	.acts {

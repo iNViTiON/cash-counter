@@ -4,6 +4,23 @@ import { SvelteKitPWA } from '@vite-pwa/sveltekit';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+	/**
+	 * Which build a device is running, shown in settings and on the error screen.
+	 * A till with no devtools cannot otherwise answer "are you on the new one?",
+	 * which is exactly the question that matters when one machine is broken and
+	 * another is not. Pages supplies the SHA; local builds say `dev`.
+	 */
+	define: {
+		// `globalThis.process` rather than a bare `process`: no @types/node here,
+		// and adding it for one env lookup is not worth the dependency.
+		__BUILD__: JSON.stringify(
+			String(
+				(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+					?.CF_PAGES_COMMIT_SHA ?? 'dev'
+			).slice(0, 7)
+		)
+	},
+
 	plugins: [
 		sveltekit({
 			compilerOptions: {

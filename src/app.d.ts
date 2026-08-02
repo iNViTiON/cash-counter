@@ -3,6 +3,9 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 declare global {
+	/** Build id, injected by vite `define`. Seven-char commit SHA, or `dev`. */
+	const __BUILD__: string;
+
 	namespace App {
 		interface Error {
 			/** Real message and stack, kept by `hooks.client.ts` so the error page

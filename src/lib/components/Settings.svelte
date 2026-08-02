@@ -366,7 +366,10 @@
 				{/if}
 			</section>
 
-			<div class="foot">Everything is stored on this device only.</div>
+			<div class="foot">
+				Everything is stored on this device only.
+				<span class="build">build {__BUILD__}</span>
+			</div>
 		</div>
 	</div>
 </div>
@@ -450,6 +453,11 @@
 		background: var(--chip-on);
 		color: var(--fg);
 		border-color: var(--acc);
+	}
+
+	.build {
+		font-family: var(--mono);
+		color: var(--muted-4);
 	}
 
 	.foot {
