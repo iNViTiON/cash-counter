@@ -57,6 +57,9 @@
 
 	onMount(() => {
 		app.hydrate();
+		// Deliberately not awaited: an async `onMount` callback has its teardown
+		// discarded, which would leak every listener registered below.
+		void app.load();
 
 		const mq = window.matchMedia('(min-aspect-ratio: 1/1) and (min-width: 620px)');
 		// Read the query on every trigger rather than trusting `change` alone —
@@ -75,10 +78,18 @@
 		// another one once the browser has actually painted.
 		requestAnimationFrame(sync);
 
+		// A phone can kill a backgrounded tab without ever running the teardown,
+		// so the working count is written out the moment the page is hidden.
+		const flush = () => {
+			if (document.visibilityState === 'hidden') app.saveWorkspace();
+		};
+		document.addEventListener('visibilitychange', flush);
+
 		return () => {
 			mq.removeEventListener('change', sync);
 			ro.disconnect();
 			window.removeEventListener('resize', sync);
+			document.removeEventListener('visibilitychange', flush);
 			app.dispose();
 		};
 	});

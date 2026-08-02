@@ -29,3 +29,16 @@ export const hm = (d: Date): string => `${pad2(d.getHours())}:${pad2(d.getMinute
 
 /** `1 piece` / `n pieces`. */
 export const pieces = (n: number): string => `${n} ${n === 1 ? 'piece' : 'pieces'}`;
+
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+/** Storage size for the settings readout, e.g. `42.3 MB`. Decimal units, as the OS reports them. */
+export function bytes(n: number): string {
+	let v = Math.max(0, n);
+	let u = 0;
+	while (v >= 1000 && u < UNITS.length - 1) {
+		v /= 1000;
+		u++;
+	}
+	return `${v.toFixed(v < 10 && u > 0 ? 1 : 0)} ${UNITS[u]}`;
+}

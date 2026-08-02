@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CENTS, denomLabel, dmy, hm, money } from '$lib/format';
+	import { bytes, CENTS, denomLabel, dmy, hm, money } from '$lib/format';
 	import { app } from '$lib/state.svelte';
 	import type { PadSize, PhotoMax } from '$lib/types';
 
@@ -306,7 +306,7 @@
 					{/each}
 				</div>
 
-				{#if !app.slots.length}
+				{#if app.ready && !app.slots.length}
 					<div class="none">Nothing saved yet.</div>
 				{/if}
 
@@ -318,6 +318,43 @@
 						DELETE ALL SLOTS
 					</button>
 				</div>
+			</section>
+
+			<section class="card">
+				<div class="label gap">STORAGE</div>
+
+				{#if app.storageErr}
+					<div class="hint err">{app.storageErr}</div>
+				{:else}
+					{#if app.usage}
+						<div class="use">
+							EuroCash is using <b>{bytes(app.usage.used)}</b> of {bytes(app.usage.quota)} available
+						</div>
+						<div class="meter">
+							<div
+								class="fill"
+								style:width={`${Math.min(100, Math.max(0.5, (app.usage.used / app.usage.quota) * 100))}%`}
+							></div>
+						</div>
+					{/if}
+
+					<!-- Phrased as advice, not jargon: on iOS "add to home screen" is
+					     literally what turns eviction off, and it is true on Android too. -->
+					{#if app.persisted === true}
+						<div class="hint pad-t">
+							Protected. This device will not delete your photos to reclaim space.
+						</div>
+					{:else if app.persisted === false}
+						<div class="hint pad-t">
+							Not protected. Add EuroCash to your home screen to keep photos safe.
+						</div>
+						<div class="danger-row">
+							<button type="button" class="btn wide" onclick={() => app.refreshStorage()}>
+								PROTECT STORAGE
+							</button>
+						</div>
+					{/if}
+				{/if}
 			</section>
 
 			<div class="foot">Everything is stored on this device only.</div>
@@ -411,5 +448,35 @@
 		color: var(--muted-5);
 		line-height: 1.6;
 		padding: 0 2px 8px;
+	}
+
+	.use {
+		font-size: 12px;
+		color: var(--muted);
+	}
+
+	.use b {
+		color: var(--fg);
+	}
+
+	.meter {
+		height: 6px;
+		margin-top: 8px;
+		border-radius: 3px;
+		background: var(--sunk);
+		overflow: hidden;
+	}
+
+	.fill {
+		height: 100%;
+		background: var(--acc);
+	}
+
+	.pad-t {
+		margin-top: 10px;
+	}
+
+	.err {
+		color: var(--danger);
 	}
 </style>

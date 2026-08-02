@@ -37,7 +37,8 @@ directly; there are no stores and no prop drilling. Two rules follow from
 prerendering:
 
 - The constructor must not touch browser APIs — module init runs during the
-  build. `hydrate()` (called from `onMount`) does all `localStorage` reading.
+  build. `hydrate()` (called from `onMount`) does all `localStorage` reading,
+  and `src/lib/db.ts` must not open its IndexedDB connection at import time.
 - DOM handles (`inputs`, `scroller`) live on `app` as `$state` so `bind:this`
   does not warn; element *dimensions* (`midW`, `midH`) are pushed onto `app` by
   the page, because overlays size themselves against that area.
@@ -55,13 +56,36 @@ compares the area the image would cover beside the counts versus under them and
 picks the winner, so tall photos go right and wide ones go bottom. The count
 grid is `auto-fill` at 240px and reflows to match.
 
-**Persistence** is four `localStorage` keys (`src/lib/storage.ts`). Reads are
-defensive and writes return `false` on quota failure, which surfaces as a toast
-— storage never throws into the UI. Photos are downscaled JPEG data URLs stored
-alongside the slot. `src/lib/photo.ts` is the one encoder every path uses
-(in-app camera, system camera, file chooser): it fits the longest edge to
-`cfg.photoMax` and steps quality down from 0.88 until the data URL is under
-~1.2 MB, so a photo slot costs at most that against the 5 MB quota.
+**Persistence is split by what has to be synchronous.** Settings (`ec.cfg`) and
+the working count (`ec.ws`) stay in `localStorage` (`src/lib/storage.ts`),
+because `measure()` reads `cfg.padSize` on the same tick as `hydrate()` and
+because a count restored a frame late is a count the user can type over and
+lose. Keeping `saveWorkspace()` synchronous is also what lets it run inside a
+`visibilitychange` handler and stops the 260 ms debounce racing itself.
+
+Slots, the quick slot and every photo live in **IndexedDB** — `src/lib/db.ts`
+is generic glue, `src/lib/store.ts` is the record layer on top, the same split
+as `storage.ts` / `state.svelte.ts`. Photos are `Blob`s in their own store,
+keyed by the owning slot's id (the workspace photo under `'ws'`). This is not
+the 5 MB `localStorage` pool: quota is a share of the disk, so the old ceiling
+of three or four photo slots is gone.
+
+`hydrate()` is synchronous and `load()` is not. `app.ready` guards the gap, and
+it is **load-bearing, not cosmetic**: `#prune()` reads `app.slots`, so running
+it before the read lands would write an empty array back over every saved slot.
+
+`navigator.storage.persist()` is called unconditionally on every launch from
+`load()`. Safari deletes script-created storage after seven days without user
+interaction, and persistence is the documented exemption — for an app holding
+photo evidence of counted cash, that call is the difference between a backup
+and a rumour.
+
+`src/lib/photo.ts` is the one encoder every path uses (in-app camera, system
+camera, file chooser). `photoFromBlob` is the entry point: it fits the longest
+edge to `cfg.photoMax`, steps quality down from 0.88 to fit ~2 MB, and passes
+the original bytes straight through when they already fit. It asks for
+`imageOrientation: 'from-image'` explicitly, because `<img>` always applies EXIF
+and `createImageBitmap`'s default has varied by engine.
 
 **Offline is a hard requirement**: every feature must work with no network.
 Nothing may be fetched at runtime. Fonts are self-hosted in `static/fonts/` for
@@ -101,7 +125,21 @@ will not be precached.
   over the old number instead of appending. Backspace and CLR count as editing.
 - Saving a slot moves the photo to the slot and clears it from the workspace;
   quantities stay.
-- Retention pruning happens on save/load, not on a timer.
+- Retention pruning happens on save/load, not on a timer. `#prune()` returns
+  `{ kept, gone }` and the `gone` ids own photo blobs — dropping a slot without
+  its photo refills the quota silently.
+- **Never `await` between opening an IndexedDB transaction and issuing its
+  requests.** The transaction goes inactive at the end of the creating task;
+  Safari enforces it and the error is an opaque `TransactionInactiveError`.
+- **Every value handed to IndexedDB must be `$state.snapshot()`ed first.**
+  Structured clone throws `DataCloneError` on a Svelte proxy. `JSON.stringify`
+  read through proxies happily, so the old code never had to think about it.
+- IDB writes resolve on `tx.oncomplete`, never `req.onsuccess` — a quota failure
+  arrives on the transaction abort, so resolving early reports success for a
+  write that then rolled back.
+- Shared CSS lives in `src/app.css`. `.head`, `.wide`, `.name` and the `.seg`
+  sizing are scoped (`.card .head`, `.setting .name`) because Camera, Keypad,
+  SlotDetail, SlotStrip, TotalBar and TopBar already own those names.
 
 ## Design source
 

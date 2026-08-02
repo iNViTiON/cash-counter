@@ -1,6 +1,9 @@
 <script lang="ts">
+	import { blobUrl } from '$lib/bloburl.svelte';
 	import { money, pieces } from '$lib/format';
 	import { app } from '$lib/state.svelte';
+
+	const thumb = blobUrl(() => app.photoBlob);
 </script>
 
 <div class="bar">
@@ -10,9 +13,13 @@
 		<div class="pieces">{pieces(app.pieceCount)}</div>
 	</div>
 
+	<!-- Gated on the metadata, which is synchronous, so the frame is reserved from
+	     the first paint and only the image inside it arrives a beat later. -->
 	{#if app.photo}
 		<div class="thumb">
-			<img alt="Evidence" src={app.photo} />
+			{#if thumb.current}
+				<img alt="Evidence" src={thumb.current} />
+			{/if}
 			<button type="button" class="drop" title="Remove photo" onclick={() => app.setPhoto(null)}>
 				✕
 			</button>

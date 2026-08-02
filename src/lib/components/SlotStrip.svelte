@@ -21,7 +21,8 @@
 	<div class="sc rail">
 		<div class="rail-cap">SLOTS</div>
 
-		{#if !app.slots.length}
+		<!-- `app.ready` or this asserts "nothing saved" during the IDB read. -->
+		{#if app.ready && !app.slots.length}
 			<div class="empty">No saved slots yet</div>
 		{/if}
 

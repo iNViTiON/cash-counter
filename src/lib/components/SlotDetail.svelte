@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { blobUrl } from '$lib/bloburl.svelte';
 	import { CENTS, denomLabel, dmy, hm, money, pieces } from '$lib/format';
 	import { app } from '$lib/state.svelte';
+	import { readPhoto } from '$lib/store';
 
 	/** Padding and gap around the photo pane inside the dialog. */
 	const FRAME_W = 40;
@@ -29,11 +31,25 @@
 
 	/** Photo aspect ratio, known only once the image has decoded. */
 	let ar = $state(0);
+	/** Evidence bytes, fetched on open rather than held in memory for every slot. */
+	let blob = $state<Blob | null>(null);
+	const url = blobUrl(() => blob);
 
-	// A different slot means a different photo; forget the old shape.
+	// A different slot means a different photo; forget the old shape and fetch.
 	$effect(() => {
-		void app.openId;
+		const id = app.openId;
 		ar = 0;
+		blob = null;
+		if (!id || !app.openSlot?.photo) return;
+		// Opening A then B quickly would otherwise let A's read land last and
+		// show the wrong evidence under B's numbers.
+		let alive = true;
+		void readPhoto(id).then((b) => {
+			if (alive) blob = b;
+		});
+		return () => {
+			alive = false;
+		};
 	});
 
 	/**
@@ -106,8 +122,12 @@
 
 				<div class="side" style:flex={layout.pane}>
 					<div class="photo">
+						<!-- An empty pane for a few ms reads as nothing; "NO PHOTO"
+						     flashing on a slot that has one reads as data loss. -->
 						{#if slot.photo}
-							<img alt="Evidence" src={slot.photo} onload={onPhotoLoad} />
+							{#if url.current}
+								<img alt="Evidence" src={url.current} onload={onPhotoLoad} />
+							{/if}
 						{:else}
 							<div class="no-photo">NO PHOTO</div>
 						{/if}

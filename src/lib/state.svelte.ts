@@ -1,6 +1,20 @@
+import { available } from './db';
 import { CENTS, dmy, money } from './format';
-import { encodePhoto } from './photo';
+import { migrate } from './migrate';
+import { photoFromBlob } from './photo';
+import {
+	claimPersistence,
+	dropAll,
+	dropSlots,
+	loadAll,
+	saveQuick,
+	saveSlot,
+	saveWsPhoto,
+	sweepOrphans,
+	usage
+} from './store';
 import { K, read, remove, write } from './storage';
+import type { EncodedPhoto } from './photo';
 import type {
 	Cam,
 	Cfg,
@@ -10,10 +24,12 @@ import type {
 	PadSide,
 	PadSize,
 	PhotoMax,
+	PhotoMeta,
 	Qty,
 	Quick,
 	SaveDay,
 	Slot,
+	StorageInfo,
 	View,
 	Workspace
 } from './types';
@@ -52,12 +68,29 @@ const freshCfg = (): Cfg => ({ ...DEFAULT_CFG, labels: [...DEFAULT_LABELS], enab
 class CashCounter {
 	/* ---------- persisted ---------- */
 	qty = $state<Qty>({});
-	photo = $state<string | null>(null);
+	/** Workspace photo *metadata*, in localStorage. The bytes are `photoBlob`. */
+	photo = $state<PhotoMeta | null>(null);
 	cfg = $state<Cfg>(freshCfg());
 	slots = $state<Slot[]>([]);
 	quick = $state<Quick | null>(null);
 
 	/* ---------- session ---------- */
+	/** Workspace photo bytes, read back from IndexedDB by `load()`. */
+	photoBlob = $state<Blob | null>(null);
+	/**
+	 * False until the IndexedDB read lands. Load-bearing, not cosmetic: `#prune()`
+	 * reads `slots`, and running it against the empty pre-load array would write
+	 * that emptiness straight back over every saved slot.
+	 */
+	ready = $state(false);
+	/** An async write is in flight — a second SAVE tap would file the count twice. */
+	saving = $state(false);
+	/** Null means the API is missing or would not say. */
+	persisted = $state<boolean | null>(null);
+	usage = $state<StorageInfo | null>(null);
+	/** Set when this browser refuses IndexedDB outright; counting still works. */
+	storageErr = $state<string | null>(null);
+
 	mode = $state<Mode>('pad');
 	padSide = $state<PadSide>('right');
 	landscape = $state(false);
@@ -125,11 +158,14 @@ class CashCounter {
 
 	/* ---------- lifecycle ---------- */
 
+	/**
+	 * Settings and the working count. Stays synchronous because `measure()` reads
+	 * `cfg.padSize` on the same tick, and because a count restored a frame late
+	 * would be a count the user could type over and lose.
+	 */
 	hydrate(): void {
 		const stored = read<Partial<Cfg> | null>(K.cfg, null);
 		const ws = read<Workspace | null>(K.ws, null);
-		const slots = read<Slot[]>(K.slots, []);
-		const quick = read<Quick | null>(K.quick, null);
 
 		const cfg = Object.assign(freshCfg(), stored ?? {});
 		if (!Array.isArray(cfg.labels) || !cfg.labels.length) cfg.labels = [...DEFAULT_LABELS];
@@ -140,14 +176,51 @@ class CashCounter {
 		this.padSide = cfg.padSide ?? 'right';
 		this.qty = cfg.autoSave && ws?.qty ? ws.qty : {};
 		this.photo = (cfg.autoSave && ws?.photo) || null;
-		this.slots = Array.isArray(slots) ? slots : [];
-		this.quick = quick;
 		this.saveLabel = cfg.labels[0];
 	}
 
+	/**
+	 * Everything in IndexedDB. Never awaited by the page — the count and the
+	 * settings are already on screen; slots and evidence arrive a frame or two
+	 * later, which is what `ready` guards.
+	 */
+	async load(): Promise<void> {
+		if (!available()) {
+			this.storageErr = 'This browser is blocking local storage — photos cannot be saved';
+			this.ready = true;
+			return;
+		}
+		try {
+			await migrate();
+			const { slots, quick, wsPhoto } = await loadAll();
+			this.slots = slots;
+			this.quick = quick;
+			this.photoBlob = wsPhoto;
+			// Metadata says there is a photo but the bytes are gone: heal, don't lie.
+			if (this.photo && !wsPhoto) {
+				this.photo = null;
+				this.saveWorkspace();
+			}
+			void sweepOrphans(slots.map((s) => s.id));
+		} catch {
+			this.storageErr = 'This browser is blocking local storage — photos cannot be saved';
+		} finally {
+			this.ready = true;
+		}
+		void this.refreshStorage();
+	}
+
+	/** Claims persistence and reads the quota. Never blocks anything. */
+	async refreshStorage(): Promise<void> {
+		this.persisted = await claimPersistence();
+		this.usage = await usage();
+	}
+
 	dispose(): void {
-		clearTimeout(this.#toastTimer);
+		// Flush rather than drop: the timer holds the only copy of the last digits.
 		clearTimeout(this.#wsTimer);
+		this.saveWorkspace();
+		clearTimeout(this.#toastTimer);
 	}
 
 	/* ---------- persistence ---------- */
@@ -158,6 +231,24 @@ class CashCounter {
 		return false;
 	}
 
+	/**
+	 * Every IndexedDB mutation goes through here, so a refused write is announced
+	 * rather than swallowed. Nothing assigns to `$state` until this returns true —
+	 * memory must never lead storage.
+	 */
+	async #save(run: () => Promise<void>): Promise<boolean> {
+		try {
+			await run();
+			return true;
+		} catch (e) {
+			const full = e instanceof DOMException && e.name === 'QuotaExceededError';
+			// With a share of the disk rather than 5 MB, "remove a photo" is no
+			// longer useful advice: a real quota error means the device is full.
+			this.say(full ? 'Device storage is full — free up space' : 'Could not save to this device');
+			return false;
+		}
+	}
+
 	persistCfg(): void {
 		this.#write(K.cfg, $state.snapshot(this.cfg));
 	}
@@ -165,7 +256,7 @@ class CashCounter {
 	/** Writes the working count so it survives a reload. No-op when auto-save is off. */
 	saveWorkspace(): void {
 		if (!this.cfg.autoSave) return;
-		this.#write(K.ws, { qty: $state.snapshot(this.qty), photo: this.photo });
+		this.#write(K.ws, { qty: $state.snapshot(this.qty), photo: $state.snapshot(this.photo) });
 	}
 
 	#queueWorkspace(): void {
@@ -179,10 +270,25 @@ class CashCounter {
 		this.#toastTimer = setTimeout(() => (this.toast = ''), TOAST_MS);
 	}
 
-	/** Slots older than the retention window, dropped on the next save or load. */
-	#prune(): Slot[] {
+	/**
+	 * Splits the slots by the retention window, applied on the next save or load.
+	 * `gone` matters as much as `kept`: those ids own photo blobs, and leaving
+	 * them behind would quietly refill the quota this migration just enlarged.
+	 */
+	#prune(): { kept: Slot[]; gone: string[] } {
 		const cut = Date.now() - this.cfg.maxAge * DAY_MS;
-		return $state.snapshot(this.slots).filter((s) => s.ts >= cut);
+		const all = $state.snapshot(this.slots);
+		return {
+			kept: all.filter((s) => s.ts >= cut),
+			gone: all.filter((s) => s.ts < cut).map((s) => s.id)
+		};
+	}
+
+	/** Guards every path that prunes or writes slots against the pre-load window. */
+	#notReady(): boolean {
+		if (this.ready) return false;
+		this.say('Still loading…');
+		return true;
 	}
 
 	/* ---------- counting ---------- */
@@ -280,119 +386,154 @@ class CashCounter {
 
 	/* ---------- slots ---------- */
 
-	commitSave(): void {
+	async commitSave(): Promise<void> {
+		if (this.#notReady() || this.saving) return;
 		// Without evidence the count does not reach a slot; the gate offers the
 		// camera, and a confirmed skip if the settings allow one.
 		if (this.cfg.needPhoto && !this.photo) {
 			this.view = 'needphoto';
 			return;
 		}
-		const slot = this.#commit(this.photo);
+		const slot = await this.#commit(this.photo, this.photoBlob);
 		if (slot) this.say(`Saved · ${money(slot.total)}`);
 	}
 
 	/** Only reachable from the gate, and only while `allowSkip` is on. */
-	saveWithoutPhoto(): void {
-		const slot = this.#commit(null);
+	async saveWithoutPhoto(): Promise<void> {
+		if (this.#notReady() || this.saving) return;
+		const slot = await this.#commit(null, null);
 		if (slot) this.say(`Saved without photo · ${money(slot.total)}`);
 	}
 
 	/** Files the count under a new slot. Null means storage refused the write. */
-	#commit(photo: string | null): Slot | null {
+	async #commit(photo: PhotoMeta | null, blob: Blob | null): Promise<Slot | null> {
 		const d = this.#dayDate(this.saveDay);
+		const now = Date.now();
 		const slot: Slot = {
 			// Not the timestamp: two saves in the same millisecond would collide,
 			// and a duplicate key is a hard error in a keyed `{#each}`.
 			id: crypto.randomUUID(),
 			label: `${this.saveLabel || 'Count'} ${dmy(d)}`,
 			date: dmy(d),
-			ts: Date.now(),
+			ts: now,
 			total: this.totalCents,
 			qty: $state.snapshot(this.qty),
-			photo
+			photo: $state.snapshot(photo),
+			updatedAt: now
 		};
-		const next = [slot, ...this.#prune()];
-		if (!this.#write(K.slots, next)) return null;
-		this.slots = next;
+		const { kept, gone } = this.#prune();
+
+		this.saving = true;
+		const ok = await this.#save(() => saveSlot(slot, blob, gone));
+		this.saving = false;
+		if (!ok) return null;
+
+		this.slots = [slot, ...kept];
 		this.view = null;
 		// The evidence belongs to the slot now — the next count starts without it.
 		this.photo = null;
+		this.photoBlob = null;
+		void saveWsPhoto(null);
 		this.saveWorkspace();
 		return slot;
 	}
 
-	loadSlot(): void {
+	async loadSlot(): Promise<void> {
+		if (this.#notReady()) return;
 		const s = this.openSlot;
 		if (!s) return;
-		const kept = this.#prune();
-		this.#write(K.slots, kept);
-		this.slots = kept;
-		this.qty = { ...s.qty };
+		// Read before the await: `openSlot` follows `openId`, which is cleared below.
+		const qty = { ...s.qty };
+		await this.#retire();
+		this.qty = qty;
 		this.view = null;
 		this.openId = null;
 		this.saveWorkspace();
 		this.say('Counts loaded');
 	}
 
-	deleteSlot(): void {
-		this.removeSlot(this.openId);
+	async deleteSlot(): Promise<void> {
+		const id = this.openId;
 		this.view = null;
 		this.openId = null;
-		this.say('Slot deleted');
+		if (await this.removeSlot(id)) this.say('Slot deleted');
 	}
 
-	removeSlot(id: string | null): void {
-		if (!id) return;
-		const next = $state.snapshot(this.slots).filter((s) => s.id !== id);
-		this.#write(K.slots, next);
-		this.slots = next;
+	async removeSlot(id: string | null): Promise<boolean> {
+		if (this.#notReady() || !id) return false;
+		if (!(await this.#save(() => dropSlots([id])))) return false;
+		this.slots = this.slots.filter((s) => s.id !== id);
+		return true;
 	}
 
-	dropAllSlots(): void {
-		this.#write(K.slots, []);
+	async dropAllSlots(): Promise<void> {
+		if (this.#notReady()) return;
+		if (!(await this.#save(dropAll))) return;
 		this.slots = [];
 		this.say('All slots deleted');
 	}
 
-	quickSave(): void {
+	async quickSave(): Promise<void> {
+		if (this.#notReady() || this.saving) return;
 		const q: Quick = { qty: $state.snapshot(this.qty), ts: Date.now(), total: this.totalCents };
-		const kept = this.#prune();
-		this.#write(K.slots, kept);
-		this.slots = kept;
-		if (!this.#write(K.quick, q)) return;
+		this.saving = true;
+		const ok = await this.#save(() => saveQuick(q));
+		this.saving = false;
+		if (!ok) return;
 		this.quick = q;
+		await this.#retire();
 		this.say('Quick saved');
 	}
 
-	quickLoad(): void {
+	async quickLoad(): Promise<void> {
+		if (this.#notReady()) return;
 		if (!this.quick) return this.say('Quick slot is empty');
-		const kept = this.#prune();
-		this.#write(K.slots, kept);
-		this.slots = kept;
-		this.qty = { ...this.quick.qty };
+		const qty = { ...this.quick.qty };
+		await this.#retire();
+		this.qty = qty;
 		this.saveWorkspace();
 		this.say('Quick loaded');
 	}
 
-	dropQuick(): void {
-		remove(K.quick);
+	async dropQuick(): Promise<void> {
+		if (this.#notReady()) return;
+		if (!(await this.#save(() => saveQuick(null)))) return;
 		this.quick = null;
 		this.say('Quick slot cleared');
 	}
 
+	/**
+	 * Applies the retention window. Failure is deliberately silent — expired
+	 * slots surviving one more save is not worth interrupting the save that
+	 * triggered the sweep.
+	 */
+	async #retire(): Promise<void> {
+		const { kept, gone } = this.#prune();
+		if (!gone.length) return;
+		try {
+			await dropSlots(gone);
+			this.slots = kept;
+		} catch {
+			/* next save tries again */
+		}
+	}
+
 	/* ---------- photo ---------- */
 
-	setPhoto(dataUrl: string | null): void {
-		this.photo = dataUrl;
+	/** Metadata is written synchronously; the bytes follow on their own. */
+	setPhoto(p: EncodedPhoto | null): void {
+		this.photo = p ? { bytes: p.blob.size, w: p.w, h: p.h } : null;
+		this.photoBlob = p?.blob ?? null;
 		this.saveWorkspace();
+		void saveWsPhoto(p?.blob ?? null);
 	}
 
 	/** Closes whichever camera path produced the shot and keeps it. */
-	attachPhoto(data: string): void {
+	attachPhoto(p: EncodedPhoto): void {
 		this.camErr = null;
 		this.camRes = '';
 		this.view = null;
-		this.setPhoto(data);
+		this.setPhoto(p);
 		this.say('Photo attached');
 	}
 
@@ -447,19 +588,17 @@ class CashCounter {
 		this.openCamera();
 	}
 
-	/** Shared by both file inputs — the system camera returns a file like any other. */
+	/**
+	 * Shared by both file inputs — the system camera returns a file like any
+	 * other. Written with `.then`, not `async`: this file must stay free of
+	 * `await` so none can drift into the `.click()` chain above.
+	 */
 	pickFile(input: HTMLInputElement): void {
 		const file = input.files?.[0];
 		if (!file) return;
-		const reader = new FileReader();
-		reader.onload = () => {
-			const img = new Image();
-			img.onload = () => this.attachPhoto(encodePhoto(img, img.width, img.height, this.photoMax));
-			img.onerror = () => this.#photoFailed('That file is not a readable image.');
-			img.src = String(reader.result);
-		};
-		reader.onerror = () => this.#photoFailed('That file could not be read.');
-		reader.readAsDataURL(file);
+		photoFromBlob(file, this.photoMax)
+			.then((p) => this.attachPhoto(p))
+			.catch(() => this.#photoFailed('That file is not a readable image.'));
 	}
 
 	/** The overlay shows its own error; the system-camera path has to be told. */
@@ -486,8 +625,11 @@ class CashCounter {
 		const on = !this.cfg.autoSave;
 		this.cfg.autoSave = on;
 		this.persistCfg();
-		if (on) this.saveWorkspace();
-		else remove(K.ws);
+		if (on) return this.saveWorkspace();
+		// The blob has to go with the key. `sweepOrphans` deliberately spares the
+		// workspace photo, so nothing else would ever collect it.
+		remove(K.ws);
+		void saveWsPhoto(null);
 	}
 
 	setDefaultMode(mode: Mode): void {

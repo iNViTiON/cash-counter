@@ -1,12 +1,20 @@
 /**
  * localStorage access. Every read is defensive — a half-written or
  * hand-edited key must never take the app down on startup.
+ *
+ * Slots and the quick slot live in IndexedDB now (`db.ts`). What is left here
+ * is what has to be readable *synchronously*, before the first paint: settings,
+ * and the working count.
  */
 
 export const K = {
 	ws: 'ec.ws',
+	cfg: 'ec.cfg'
+} as const;
+
+/** Read once by `migrate.ts`, then removed. Nothing else may touch these. */
+export const LEGACY = {
 	slots: 'ec.slots',
-	cfg: 'ec.cfg',
 	quick: 'ec.quick'
 } as const;
 
