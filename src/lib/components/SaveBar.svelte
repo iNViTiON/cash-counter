@@ -2,7 +2,8 @@
 	import { app } from '$lib/state.svelte';
 </script>
 
-<div class="no-sb bar">
+<div class="shell">
+<div class="no-sb bar" class:dim={app.viewing}>
 	<div class="title">SAVE AS</div>
 
 	<div class="chips">
@@ -35,20 +36,81 @@
 		</button>
 	</div>
 
-	<div class="date">{app.filedOn}</div>
+	<!-- Not shown while browsing: the date a save would be filed under is a lie
+	     when nothing here can be saved. -->
+	{#if !app.viewing}
+		<div class="date">{app.filedOn}</div>
+	{/if}
+</div>
+
+{#if app.viewing}
+	<div class="ro-chip"><span>☁ READ-ONLY</span></div>
+	<!--
+		A transparent lid over the whole bar rather than `disabled` on each control.
+		A disabled button is silent, and silence is the wrong answer here: the tap
+		is not a mistake, it is a reasonable thing to try while the strip is showing
+		another till, and it deserves a sentence saying which one and how to leave.
+	-->
+	<div
+		class="lid"
+		role="presentation"
+		title="Read-only while viewing another machine"
+		onclick={() => app.blockSave()}
+	></div>
+{/if}
 </div>
 
 <style>
-	.bar {
+	.shell {
+		position: relative;
 		flex: 0 0 auto;
+		display: flex;
+		align-items: stretch;
+		background: var(--strip);
+		border-top: 1px solid var(--line);
+	}
+
+	.bar {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		align-items: center;
 		gap: 9px;
 		padding: 7px 12px;
-		background: var(--strip);
-		border-top: 1px solid var(--line);
 		overflow-x: auto;
 		overflow-y: hidden;
+	}
+
+	.bar.dim {
+		opacity: 0.36;
+	}
+
+	.ro-chip {
+		flex: 0 0 auto;
+		display: flex;
+		align-items: center;
+		padding: 0 12px 0 6px;
+	}
+
+	.ro-chip span {
+		display: flex;
+		align-items: center;
+		height: 22px;
+		padding: 0 9px;
+		border: 1px solid var(--view-line);
+		border-radius: 6px;
+		background: var(--view-bg);
+		color: var(--view-fg);
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+		white-space: nowrap;
+	}
+
+	.lid {
+		position: absolute;
+		inset: 0;
+		cursor: not-allowed;
 	}
 
 	.title {

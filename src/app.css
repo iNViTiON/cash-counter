@@ -26,8 +26,32 @@
 	--acc-ink: #141414;
 	--danger: #ff6b58;
 
+	/*
+	 * The second accent, used only for "this is somewhere else". Amber is what
+	 * this device does; blue is what another machine's bucket holds. Keeping them
+	 * disjoint is what lets the ☁ glyph and a bar tint say "read-only" without a
+	 * banner — see the viewing states in TopBar, SaveBar and SlotStrip.
+	 */
+	--view: #6fb6d6;
+	--view-fg: #8fcbe6;
+	--view-dim: #5e93ab;
+	--view-bg: #132a34;
+	--view-line: #2c566a;
+	--bar-view: #131a1e;
+	--strip-view: #111619;
+
 	--sans: Archivo, system-ui, -apple-system, sans-serif;
 	--mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@keyframes ec-pulse {
+	0%,
+	100% {
+		opacity: 0.34;
+	}
+	50% {
+		opacity: 0.8;
+	}
 }
 
 html,

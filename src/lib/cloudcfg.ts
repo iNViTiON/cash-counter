@@ -75,7 +75,9 @@ export function defaultCloud(): CloudCfg {
 		syncFrom: 0,
 		lastSyncAt: 0,
 		lastPruneAt: 0,
-		lastGcAt: 0
+		lastGcAt: 0,
+		defaultProfile: 'local',
+		lastProfile: ''
 	};
 }
 
@@ -85,6 +87,8 @@ export function readCloud(): CloudCfg {
 	if (cfg.cloudAge !== 7 && cfg.cloudAge !== 31) cfg.cloudAge = 31;
 	if (cfg.style !== 'vhost') cfg.style = 'path';
 	if (cfg.role !== 'viewer') cfg.role = 'writer';
+	if (typeof cfg.defaultProfile !== 'string' || !cfg.defaultProfile) cfg.defaultProfile = 'local';
+	if (typeof cfg.lastProfile !== 'string') cfg.lastProfile = '';
 	// Trailing slash or not is the user's business; the key builders assume one.
 	if (cfg.prefix && !cfg.prefix.endsWith('/')) cfg.prefix += '/';
 	cfg.endpoint = cfg.endpoint.replace(/\/+$/, '');

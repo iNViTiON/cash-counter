@@ -19,6 +19,7 @@ import { K, read, remove, write } from './storage';
 import type { EncodedPhoto } from './photo';
 import type { Viewer } from './viewer.svelte';
 import type {
+	ArchiveRow,
 	Cam,
 	Cfg,
 	CloudCfg,
@@ -129,6 +130,16 @@ class CashCounter {
 	remotes = $state<Remote[]>([]);
 	/** Session-only viewer engine, dynamically imported when first needed. */
 	viewer = $state<Viewer | null>(null);
+	/** The strip's profile popover. */
+	profilesOpen = $state(false);
+	/** The "all slots" sheet, which is the strip without the six-chip cap. */
+	allOpen = $state(false);
+	/**
+	 * A profile was just added and has not been told where the app should open.
+	 * Asked once, at import, because a tablet added for one till and a spare that
+	 * must stay local are otherwise the same two invisible taps apart.
+	 */
+	askProfile = $state<{ id: string; name: string } | null>(null);
 
 	/* ---------- lock ---------- */
 	lock = $state<Lock>({ pin: '' });
@@ -208,6 +219,74 @@ class CashCounter {
 	/** For the badge only — `#allow()` re-reads the wall clock regardless. */
 	unlocked = $derived(this.unlockedUntil > 0);
 
+	/* ---------- what the strip is showing ---------- */
+
+	/** The profile being browsed, or null for this device. */
+	viewing = $derived(this.viewer?.active ?? null);
+
+	/**
+	 * The one list every slot surface renders: the strip, the "all slots" sheet
+	 * and the detail. Three sources, one shape.
+	 *
+	 * Remote rows are built here and never assigned into `slots`, so `#prune()` —
+	 * which runs on save and load against the *local* retention window — can never
+	 * see them, and no persistence path can write them to this device.
+	 *
+	 * The fall-through matters more than it looks: with cloud configured but
+	 * unreachable, `link.merged` still yields every local slot, so an offline
+	 * launch paints the real list immediately instead of an empty or spinning
+	 * strip. A failed listing degrades to local-only; it never blanks.
+	 */
+	rows = $derived.by<ArchiveRow[]>(() => {
+		const v = this.viewer;
+		if (v?.active) {
+			return v.entries.map((e) => ({
+				id: e.id,
+				ts: e.ts,
+				label: e.label ?? '',
+				date: e.date ?? '',
+				total: e.total ?? 0,
+				where: 'cloud' as const,
+				local: null,
+				cloud: e
+			}));
+		}
+		if (this.link) return this.link.merged;
+		return this.slots.map((s) => ({
+			id: s.id,
+			ts: s.ts,
+			label: s.label,
+			date: s.date,
+			total: s.total,
+			where: 'local' as const,
+			local: s,
+			cloud: null
+		}));
+	});
+
+	openRow = $derived(this.rows.find((r) => r.id === this.openId) ?? null);
+
+	/**
+	 * The open row as a `Slot`, for the detail. A cloud-only or remote row has no
+	 * local record, so one is synthesised from the cached index — display data
+	 * only, built fresh on every read and never handed to storage.
+	 */
+	detailSlot = $derived.by<Slot | null>(() => {
+		const r = this.openRow;
+		if (!r) return null;
+		if (r.local) return r.local;
+		return {
+			id: r.id,
+			label: r.label,
+			date: r.date,
+			ts: r.ts,
+			total: r.total,
+			qty: r.cloud?.qty ?? {},
+			photo: r.cloud?.photoKey ? { bytes: 0, w: 0, h: 0 } : null,
+			updatedAt: r.ts
+		};
+	});
+
 	#dayDate(day: SaveDay): Date {
 		const d = new Date();
 		if (day === 'yesterday') d.setDate(d.getDate() - 1);
@@ -254,33 +333,123 @@ class CashCounter {
 		this.#write(K.remotes, $state.snapshot(this.remotes));
 	}
 
-	addRemote(r: Omit<Remote, 'id' | 'addedAt'>): void {
-		this.#allow(`Add the viewer profile "${r.name}"`, () => {
+	/**
+	 * `after` runs inside the gated job, not beside it. The caller's dialog must
+	 * only close once the profile actually exists — closing it next to the call
+	 * would throw away a pasted token whenever the PIN prompt is cancelled.
+	 */
+	addRemote(r: Omit<Remote, 'id' | 'addedAt'>, after?: () => void): void {
+		this.#allow(`Add the cloud profile "${r.name}"`, () => {
 			const prefix = r.prefix.trim();
+			const id = crypto.randomUUID();
 			this.remotes = [
 				...this.remotes,
 				{
 					...r,
 					prefix: prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix,
-					id: crypto.randomUUID(),
+					id,
 					addedAt: Date.now()
 				}
 			];
 			this.persistRemotes();
-			this.say('Viewer profile added');
+			after?.();
+			// Asked rather than assumed: the answer decides what the strip shows on
+			// every future launch, and a silent default is the wrong one half the time.
+			this.askProfile = { id, name: r.name };
 		});
 	}
 
 	removeRemote(id: string): void {
-		this.#allow('Remove this viewer profile', () => {
+		const name = this.remotes.find((p) => p.id === id)?.name ?? 'this profile';
+		this.#allow(`Remove the cloud profile "${name}"`, () => {
 			this.remotes = this.remotes.filter((p) => p.id !== id);
 			this.persistRemotes();
-			if (this.viewer?.active?.id === id) this.viewer.showLocal();
+			if (this.viewer?.active?.id === id) this.showLocal();
+			// A default pointing at a profile that no longer exists would silently
+			// fall back on every launch; make the fallback the stored answer.
+			if (this.cloudCfg.defaultProfile === id) this.setDefaultProfile('local', true);
+			if (this.cloudCfg.lastProfile === id) {
+				this.cloudCfg.lastProfile = '';
+				this.persistCloud();
+			}
+			this.say('Profile removed');
 		});
 	}
 
 	/**
-	 * Points the archive at another machine's bucket.
+	 * Which profile the strip opens on. Not gated: it only changes what is read,
+	 * and reading a bucket this device already holds a key for gives away nothing
+	 * the key did not already give away.
+	 */
+	setDefaultProfile(v: string, quiet = false): void {
+		this.cloudCfg.defaultProfile = v;
+		this.persistCloud();
+		if (quiet) return;
+		const r = this.remotes.find((p) => p.id === v);
+		this.say(
+			`Opens on ${v === 'local' ? 'this device' : v === 'last' ? 'the last profile used' : (r?.name ?? 'that profile')}`
+		);
+	}
+
+	/** The first-run answer for a freshly added profile. */
+	answerAskProfile(v: string): void {
+		this.setDefaultProfile(v, true);
+		const name = this.askProfile?.name;
+		this.askProfile = null;
+		const r = this.remotes.find((p) => p.id === v);
+		this.say(
+			`${name ?? 'Profile'} added · opens on ${
+				v === 'local' ? 'this device' : v === 'last' ? 'the last one used' : (r?.name ?? 'it')
+			}`
+		);
+	}
+
+	/**
+	 * The full list. Opening it is also the signal to stop rationing metadata
+	 * fetches — the user is looking at every row, so the round trips are worth it.
+	 */
+	openAllSlots(): void {
+		this.allOpen = true;
+		this.profilesOpen = false;
+		if (!this.viewing) void this.link?.fillAllMeta();
+	}
+
+	/** Back to this device's own slots. Safe with no viewer module loaded. */
+	showLocal(): void {
+		this.viewer?.showLocal();
+		this.profilesOpen = false;
+		this.openId = null;
+		this.view = null;
+		this.cloudCfg.lastProfile = '';
+		this.persistCloud();
+	}
+
+	/** Strip picker: null is this device, otherwise a profile id. */
+	pickProfile(id: string | null): void {
+		this.profilesOpen = false;
+		if (!id) {
+			if (this.viewing) this.say('Back on this device');
+			this.showLocal();
+			return;
+		}
+		if (this.viewing?.id === id) return;
+		void this.openRemote(id);
+	}
+
+	/**
+	 * Applies `defaultProfile` once the profile list is known. Failure is
+	 * deliberately quiet beyond the viewer's own status: a bucket that cannot be
+	 * reached at launch must not stop the app opening on this device's counts.
+	 */
+	async #openDefaultProfile(): Promise<void> {
+		const d = this.cloudCfg.defaultProfile || 'local';
+		const id = d === 'local' ? '' : d === 'last' ? this.cloudCfg.lastProfile : d;
+		if (!id || !this.remotes.some((r) => r.id === id)) return;
+		await this.openRemote(id);
+	}
+
+	/**
+	 * Points the slot strip at another machine's bucket, read-only.
 	 *
 	 * The source machine's PIN is held in a local `const` for the length of this
 	 * call and discarded. It is never assigned to `$state`, never written to
@@ -311,15 +480,28 @@ class CashCounter {
 			return;
 		}
 
-		if (!sourcePin) {
-			await m.viewer.open(profile);
-			this.view = 'archive';
-			return;
-		}
-		this.#askSourcePin(profile.name, sourcePin, () => {
+		const enter = (): void => {
+			this.openId = null;
+			this.view = null;
+			this.cloudCfg.lastProfile = profile.id;
+			this.persistCloud();
 			void m.viewer.open(profile);
-			this.view = 'archive';
-		});
+			this.say(`Viewing ${profile.name} · read-only`);
+		};
+		if (!sourcePin) return enter();
+		this.#askSourcePin(profile.name, sourcePin, enter);
+	}
+
+	/**
+	 * Why SAVE does nothing while a profile is open.
+	 *
+	 * The strip *is* the archive now, so a save made while browsing another till
+	 * would land in a list that is not on screen. Refusing and saying so beats
+	 * filing a count into thin air. Counting, CLEAR and PHOTO all keep working —
+	 * only the commit is blocked.
+	 */
+	blockSave(): void {
+		this.say(`Read-only — viewing ${this.viewing?.name ?? 'another machine'}. Switch to THIS DEVICE to save.`);
 	}
 
 	/**
@@ -346,6 +528,9 @@ class CashCounter {
 			}
 			void sweepOrphans(slots.map((s) => s.id));
 			void this.startCloud();
+			// Not awaited, and after the local read: the strip must paint this
+			// device's counts first whatever the network is doing.
+			void this.#openDefaultProfile();
 		} catch {
 			this.storageErr = 'This browser is blocking local storage — photos cannot be saved';
 		} finally {
@@ -794,6 +979,7 @@ class CashCounter {
 	/* ---------- slots ---------- */
 
 	async commitSave(): Promise<void> {
+		if (this.viewing) return this.blockSave();
 		if (this.#notReady() || this.saving) return;
 		// Without evidence the count does not reach a slot; the gate offers the
 		// camera, and a confirmed skip if the settings allow one.
@@ -807,6 +993,7 @@ class CashCounter {
 
 	/** Only reachable from the gate, and only while `allowSkip` is on. */
 	async saveWithoutPhoto(): Promise<void> {
+		if (this.viewing) return this.blockSave();
 		if (this.#notReady() || this.saving) return;
 		const slot = await this.#commit(null, null);
 		if (slot) this.say(`Saved without photo · ${money(slot.total)}`);
@@ -877,6 +1064,10 @@ class CashCounter {
 		// Captured now: `openSlot` follows `openId`, which the dialog clears below.
 		const id = this.openId;
 		if (this.#notReady()) return;
+		// The button is hidden on a cloud-only or remote row, but the guard is here
+		// too: without it a remote id would sail through `dropSlots` matching
+		// nothing and report a deletion that never happened.
+		if (!this.openRow?.local) return;
 		this.view = null;
 		this.openId = null;
 		this.#allow('Delete this slot', async () => {
@@ -912,6 +1103,7 @@ class CashCounter {
 	}
 
 	async quickSave(): Promise<void> {
+		if (this.viewing) return this.blockSave();
 		if (this.#notReady() || this.saving) return;
 		const q: Quick = { qty: $state.snapshot(this.qty), ts: Date.now(), total: this.totalCents };
 		this.saving = true;

@@ -76,10 +76,12 @@ src/lib/s3.ts              PUT/GET/HEAD/DELETE/ListObjectsV2 over presigned URLs
 src/lib/cloudcfg.ts        cloud settings, credentials, and the object-key layout
 src/lib/cloud.svelte.ts    backup engine — upload queue, retention, orphan GC
 src/lib/remote.ts          read-only access to another machine's bucket
-src/lib/viewer.svelte.ts   viewer profiles and the remote archive listing
+src/lib/viewer.svelte.ts   cloud profiles and the remote listing behind the strip
+src/lib/cloudshare.ts      EC1 config strings — share, build around a key, import
 src/lib/state.svelte.ts    the whole app state as one runes class, exported as `app`
 src/lib/components/        TopBar, DenomList, Keypad, SaveBar, TotalBar,
-                           SlotStrip, SlotDetail, Camera, Settings, Toast
+                           SlotStrip, AllSlots, SlotDetail, Camera, Settings,
+                           PinGate, AskProfile, Toast
 src/routes/+page.svelte    composition, keypad sizing, orientation handling
 ```
 
@@ -147,10 +149,24 @@ and using the quick slot — all after `fetch()` to the origin started throwing.
     Object Read & Write on a single bucket**, never account-wide: anything that
     can read this browser's storage can read them, and no browser storage
     prevents that.
-- **Cloud viewer** profiles let you browse another machine's bucket read-only
-  from the archive screen. Give them an **Object Read only** token. Handing
-  someone a profile hands them that bucket's data until you rotate the token —
-  the PIN check gates this app's screen, not the bucket.
-- **Admin PIN** sits in front of deleting slots, shortening retention, and the
-  cloud and viewer settings. It is stored in plain text and is a guard against a
-  wrong tap, not a security control; the setup screen says so.
+- **The slot strip is the archive.** It shows what is on the device and what is
+  in the bucket in one list — `▣` for here, `☁` for the cloud, both when a slot
+  is in both places. SHOW ALL opens the full list. With cloud backup on and a
+  shorter local window than cloud window, a count keeps showing after the device
+  has dropped it.
+- **Cloud profiles** point the strip at another machine's bucket, read-only. Give
+  them an **Object Read only** token. Handing someone a profile hands them that
+  bucket's data until you rotate the token — the PIN check gates this app's
+  screen, not the bucket. While a profile is open **SAVE is off**, because a
+  count saved there would file into a list you are not looking at; counting,
+  CLEAR and PHOTO carry on, and switching back to THIS DEVICE restores saving.
+  Settings chooses which profile the app opens on.
+  - A device only holds its own read-write key, so it cannot make a read-only
+    string out of it. **BUILD A STRING** wraps a key you made in the bucket
+    console around this device's endpoint and bucket. The scope is whatever you
+    gave that key; the string only carries a label.
+- **Admin PIN** sits in front of everything that loses data or hands out access:
+  deleting slots, clearing the quick slot, shortening retention, changing the
+  photo requirement, and every cloud credential. Choosing and switching profiles
+  stay open — they only change what is read. It is stored in plain text and is a
+  guard against a wrong tap, not a security control; the setup screen says so.

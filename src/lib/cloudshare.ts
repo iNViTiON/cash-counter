@@ -68,8 +68,13 @@ function sum(s: string): string {
 	return h.toString(36);
 }
 
+function pack(payload: SharedConfig): string {
+	const body = toB64(JSON.stringify(payload));
+	return `${PREFIX}.${body}.${sum(body)}`;
+}
+
 export function encodeConfig(cfg: CloudCfg, key: CloudKey): string {
-	const payload: SharedConfig = {
+	return pack({
 		kind: 'backup',
 		endpoint: cfg.endpoint,
 		bucket: cfg.bucket,
@@ -80,9 +85,47 @@ export function encodeConfig(cfg: CloudCfg, key: CloudKey): string {
 		role: cfg.role,
 		accessKeyId: key.accessKeyId,
 		secretAccessKey: key.secretAccessKey
-	};
-	const body = toB64(JSON.stringify(payload));
-	return `${PREFIX}.${body}.${sum(body)}`;
+	});
+}
+
+/** Where this device's bucket lives, without any credential attached to it. */
+export type BucketRef = Pick<
+	CloudCfg,
+	'endpoint' | 'bucket' | 'region' | 'style' | 'prefix' | 'cloudAge'
+>;
+
+/**
+ * A string around a key the operator **pasted**, not the one stored here.
+ *
+ * This exists because a device cannot make a read-only string out of its own
+ * credentials: it holds exactly one key, the read-write one it backs up with,
+ * and re-labelling that as `viewer` would be a lie the receiving app has no way
+ * to detect. So handing someone view-only access means making a read-only key
+ * in the bucket console and wrapping it here.
+ *
+ * `kind` is a label for the receiving app, not a restriction. What the key can
+ * actually do is whatever the bucket policy says, and nothing in this file —
+ * or in the app that reads it — can check that.
+ */
+export function encodeFor(
+	kind: 'backup' | 'viewer',
+	name: string,
+	bucket: BucketRef,
+	key: CloudKey
+): string {
+	return pack({
+		kind,
+		name,
+		endpoint: bucket.endpoint,
+		bucket: bucket.bucket,
+		region: bucket.region,
+		style: bucket.style,
+		prefix: bucket.prefix,
+		cloudAge: bucket.cloudAge,
+		role: kind === 'viewer' ? 'viewer' : 'writer',
+		accessKeyId: key.accessKeyId,
+		secretAccessKey: key.secretAccessKey
+	});
 }
 
 export type DecodeResult =
@@ -144,21 +187,19 @@ export function encodeViewer(r: {
 	accessKeyId: string;
 	secretAccessKey: string;
 }): string {
-	const payload: SharedConfig = {
-		kind: 'viewer',
-		name: r.name,
-		endpoint: r.endpoint,
-		bucket: r.bucket,
-		region: r.region,
-		style: r.style,
-		prefix: r.prefix,
-		cloudAge: 31,
-		role: 'viewer',
-		accessKeyId: r.accessKeyId,
-		secretAccessKey: r.secretAccessKey
-	};
-	const body = toB64(JSON.stringify(payload));
-	return `${PREFIX}.${body}.${sum(body)}`;
+	return encodeFor(
+		'viewer',
+		r.name,
+		{
+			endpoint: r.endpoint,
+			bucket: r.bucket,
+			region: r.region,
+			style: r.style,
+			prefix: r.prefix,
+			cloudAge: 31
+		},
+		{ accessKeyId: r.accessKeyId, secretAccessKey: r.secretAccessKey }
+	);
 }
 
 function normalisePrefix(p: string): string {

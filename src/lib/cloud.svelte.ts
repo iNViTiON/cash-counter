@@ -341,7 +341,7 @@ export class CloudLink {
 		writeIndex($state.snapshot(this.index));
 	}
 
-	/** Called by the archive screen, where the user is looking and wants it all. */
+	/** Called by the "all slots" sheet, where the user asked to see everything. */
 	async fillAllMeta(): Promise<void> {
 		const t = this.target;
 		if (!t || !navigator.onLine) return;

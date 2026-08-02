@@ -3,15 +3,29 @@
 </script>
 
 <section class="card">
-	<div class="label">ADMIN PIN</div>
+	<div class="head">
+		<div class="label">ADMIN PIN</div>
+		<div class="spacer"></div>
+		<div class="tag" class:on={app.pinSet}>{app.pinSet ? 'ON' : 'NOT SET'}</div>
+	</div>
+	<!--
+		Written to match what `#allow()` actually guards, not a shorter list that
+		reads better. If this sentence and the gate ever disagree, the sentence is
+		the bug: it is the only description of the policy a user ever sees.
+	-->
 	<div class="hint gap">
-		A 4–8 digit code in front of deleting slots and changing these settings.
+		A 4–8 digit code in front of everything that loses data or hands out access: deleting a slot or
+		every slot, clearing the quick slot, shortening how long slots are kept, changing the photo
+		requirement, and every cloud credential — reading one, editing one, building a sharing string,
+		or adding and removing a profile. Choosing which profile the strip opens on, and switching
+		between them, stay open: they only change what is read. This is a mis-tap guard, not security —
+		the PIN is stored in plain text on this device.
 	</div>
 
 	{#if app.pinSet}
 		<div class="head">
 			<div class="state" class:open={app.unlocked}>
-				{app.unlocked ? 'Unlocked' : 'Locked'}
+				{app.unlocked ? 'Unlocked — guarded settings stay open for five minutes' : 'Locked'}
 			</div>
 			<div class="spacer"></div>
 			{#if app.unlocked}
@@ -59,6 +73,24 @@
 </section>
 
 <style>
+	.tag {
+		display: flex;
+		align-items: center;
+		height: 22px;
+		padding: 0 8px;
+		border-radius: 5px;
+		background: var(--chip-on);
+		color: var(--muted);
+		font-size: 9px;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+	}
+
+	.tag.on {
+		background: #2a2318;
+		color: var(--acc);
+	}
+
 	.state {
 		font-family: var(--mono);
 		font-size: 11px;

@@ -26,20 +26,16 @@ export type PadKey =
 export type PadSide = 'left' | 'right';
 export type SaveDay = 'today' | 'yesterday';
 /**
- * `archive` is a full-screen list; `archslot` is its detail, and it mounts
- * inside `.mid` like `slot` does — `SlotDetail`'s photo placement measures
- * against `midW`/`midH` and its overlay is absolute against `.mid`, so putting
- * it inside a fixed full-screen shell would compute against the wrong box.
+ * There is deliberately no `archive` value. The archive used to be its own
+ * full-screen list reached from the top bar; it is now the slot strip itself,
+ * which shows local slots, cloud-only objects and — when a profile is picked —
+ * another machine's bucket. One list, one detail.
+ *
+ * `slot` mounts inside `.mid`: `SlotDetail`'s photo placement measures against
+ * `midW`/`midH` and its overlay is absolute against `.mid`, so a fixed
+ * full-screen shell would compute the layout against the wrong box.
  */
-export type View =
-	| null
-	| 'slot'
-	| 'camera'
-	| 'settings'
-	| 'campick'
-	| 'needphoto'
-	| 'archive'
-	| 'archslot';
+export type View = null | 'slot' | 'camera' | 'settings' | 'campick' | 'needphoto';
 export type MaxAge = 7 | 31;
 export type PadSize = 25 | 50 | 75 | 100;
 /** Where a photo comes from: the phone's own camera app, or the in-app overlay. */
@@ -172,6 +168,15 @@ export interface CloudCfg {
 	lastSyncAt: number;
 	lastPruneAt: number;
 	lastGcAt: number;
+	/**
+	 * Which profile the slot strip opens on: `'local'`, `'last'`, or a `Remote`
+	 * id. Lives here rather than in `Cfg` so a device that has never touched the
+	 * cloud keeps a byte-identical settings blob — and a profile list is
+	 * meaningless without cloud state anyway.
+	 */
+	defaultProfile: string;
+	/** Last profile actually browsed, for `defaultProfile: 'last'`. Empty is this device. */
+	lastProfile: string;
 }
 
 /** Kept under its own key so encrypting it later touches exactly one module. */

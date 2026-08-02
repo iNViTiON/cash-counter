@@ -49,7 +49,17 @@
 		/>
 
 		<button type="button" class="btn btn-danger wide" onclick={() => app.clearAll()}>CLEAR</button>
-		<button type="button" class="btn-primary save" onclick={() => app.commitSave()}>SAVE</button>
+		<!-- Greyed but never `disabled`: `commitSave` answers a tap while browsing
+		     with the sentence that explains it. PHOTO and CLEAR keep working —
+		     only the commit is blocked, so counting carries on. -->
+		<button
+			type="button"
+			class="btn-primary save"
+			class:blocked={app.viewing}
+			onclick={() => app.commitSave()}
+		>
+			SAVE
+		</button>
 	</div>
 </div>
 
@@ -146,5 +156,13 @@
 		height: 46px;
 		padding: 0 20px;
 		font-size: 12px;
+	}
+
+	.save.blocked,
+	.save.blocked:hover {
+		background: var(--chip-on);
+		color: var(--muted-4);
+		cursor: not-allowed;
+		filter: none;
 	}
 </style>
