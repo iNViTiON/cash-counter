@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { decodeConfig, encodeViewer } from '$lib/cloudshare';
 	import { app } from '$lib/state.svelte';
+	import type { Remote } from '$lib/types';
 
 	let open = $state(false);
 	let name = $state('');
@@ -31,6 +33,71 @@
 	const complete = $derived(
 		Boolean(name.trim() && endpoint.trim() && bucket.trim() && accessKeyId && secretAccessKey)
 	);
+
+	/* ---------- one-string transfer ---------- */
+
+	let share = $state<'export' | 'import' | null>(null);
+	let shareToken = $state('');
+	let shareName = $state('');
+	let importText = $state('');
+	let importErr = $state('');
+	/** Set when the pasted token says it was made as a backup (read-write) key. */
+	let importWarn = $state('');
+
+	function shareProfile(r: Remote): void {
+		if (locked) return unlock();
+		app.guard(`Show the config string for “${r.name}”`, () => {
+			shareName = r.name;
+			shareToken = encodeViewer(r);
+			share = 'export';
+		});
+	}
+
+	function openImport(): void {
+		if (locked) return unlock();
+		app.guard('Import a viewer profile', () => {
+			importText = '';
+			importErr = '';
+			importWarn = '';
+			share = 'import';
+		});
+	}
+
+	function applyImport(): void {
+		const res = decodeConfig(importText);
+		if (!res.ok) {
+			importErr = res.error;
+			return;
+		}
+		const c = res.config;
+		// The app cannot inspect a key's real scope. What it can do is notice when
+		// the sending device labelled it a backup key, which means read-write.
+		if (c.kind === 'backup' && !importWarn) {
+			importWarn =
+				'That string was made by a device\u2019s CLOUD BACKUP card, so it almost certainly carries a read-write key. A viewer should hold an Object Read only token. Press IMPORT again to add it anyway.';
+			return;
+		}
+		app.addRemote({
+			name: c.name || c.bucket || 'Imported',
+			endpoint: c.endpoint,
+			bucket: c.bucket,
+			region: c.region,
+			prefix: c.prefix,
+			style: c.style,
+			accessKeyId: c.accessKeyId,
+			secretAccessKey: c.secretAccessKey
+		});
+		share = null;
+	}
+
+	async function copyToken(): Promise<void> {
+		try {
+			await navigator.clipboard.writeText(shareToken);
+			app.say('Config string copied');
+		} catch {
+			app.say('Could not copy — select it by hand');
+		}
+	}
 
 	function add(): void {
 		if (!complete) return app.say('Fill in every field first');
@@ -68,6 +135,9 @@
 					<div class="slot-name">{r.name}</div>
 					<div class="stamp">{r.bucket}{r.prefix ? ` · ${r.prefix}` : ''}</div>
 				</div>
+				<button type="button" class="btn tiny" title="Share this profile" onclick={() => shareProfile(r)}>
+					SHARE
+				</button>
 				<button
 					type="button"
 					class="btn btn-danger x big"
@@ -90,8 +160,12 @@
 		</button>
 	{/if}
 
+	<div class="danger-row">
+		<button type="button" class="btn wide" onclick={openImport}>IMPORT A PROFILE STRING</button>
+	</div>
+
 	<button type="button" class="disclose" onclick={() => (locked ? unlock() : (open = !open))}>
-		{open ? '▾' : '▸'} ADD A PROFILE
+		{open ? '▾' : '▸'} ADD A PROFILE BY HAND
 	</button>
 
 	{#if open}
@@ -135,7 +209,108 @@
 	</div>
 </section>
 
+{#if share}
+	<div class="scrim">
+		<div class="sheet share">
+			{#if share === 'export'}
+				<div class="sheet-title acc">SHARE “{shareName}”</div>
+				<div class="sheet-body">
+					Paste this on the other device under CLOUD VIEWER to add the same profile.
+				</div>
+				<div class="warn">
+					<b>This string contains that bucket's secret key in clear.</b> It should be an
+					<b>Object Read only</b> token scoped to one bucket — EuroCash cannot check that for you.
+					If it is a read-write key, whoever receives this can change or delete that machine's
+					counts. Send it the way you would send a password.
+				</div>
+				<textarea class="token" readonly rows="4" value={shareToken}></textarea>
+				<button type="button" class="btn-primary act" onclick={copyToken}>COPY CONFIG STRING</button>
+			{:else}
+				<div class="sheet-title acc">IMPORT A VIEWER PROFILE</div>
+				<div class="sheet-body">
+					Paste a profile string from the machine you want to read. It is added as a new profile;
+					nothing already here is replaced.
+				</div>
+				<textarea
+					class="token"
+					rows="4"
+					placeholder="EC1.…"
+					bind:value={importText}
+					oninput={() => { importErr = ''; importWarn = ''; }}
+				></textarea>
+				{#if importErr}<div class="imp-err">{importErr}</div>{/if}
+				{#if importWarn}<div class="warn">{importWarn}</div>{/if}
+				<button type="button" class="btn-primary act" onclick={applyImport}>
+					{importWarn ? 'IMPORT ANYWAY' : 'IMPORT'}
+				</button>
+			{/if}
+			<button type="button" class="cancel" onclick={() => (share = null)}>CLOSE</button>
+		</div>
+	</div>
+{/if}
+
 <style>
+	.share {
+		max-width: 460px;
+	}
+
+	.acc {
+		color: var(--acc);
+	}
+
+	.token {
+		width: 100%;
+		padding: 10px;
+		border: 1px solid var(--line-input);
+		border-radius: 9px;
+		background: var(--sunk);
+		color: var(--fg-dim);
+		font-family: var(--mono);
+		font-size: 11px;
+		line-height: 1.45;
+		resize: vertical;
+		outline: none;
+		word-break: break-all;
+	}
+
+	.token:focus {
+		border-color: var(--acc);
+	}
+
+	.imp-err {
+		font-size: 11px;
+		color: var(--danger);
+	}
+
+	.act {
+		height: 44px;
+		font-size: 11px;
+	}
+
+	.cancel {
+		height: 40px;
+		border: 0;
+		background: transparent;
+		color: var(--muted-2);
+		cursor: pointer;
+		font-family: var(--sans);
+		font-size: 11px;
+		font-weight: 700;
+		letter-spacing: 0.1em;
+	}
+
+	.cancel:hover {
+		color: var(--fg-dim);
+	}
+
+	.tiny {
+		height: 30px;
+		padding: 0 10px;
+		border-radius: 7px;
+		font-size: 10px;
+		flex: 0 0 auto;
+	}
+
 	.locked {
 		width: 100%;
 		margin-top: 8px;

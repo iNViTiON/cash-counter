@@ -56,9 +56,13 @@
 		<div class="stack">
 			{#if app.remotes.length}
 				<div class="seg picker">
-					<button type="button" class:on={!viewing} onclick={() => app.viewer?.showLocal()}>
-						THIS DEVICE
-					</button>
+					<!-- Only offered when this device actually has a bucket of its own.
+					     A view-only tablet has nothing to show under "this device". -->
+					{#if link}
+						<button type="button" class:on={!viewing} onclick={() => app.viewer?.showLocal()}>
+							THIS DEVICE
+						</button>
+					{/if}
 					{#each app.remotes as r (r.id)}
 						<button type="button" class:on={viewing?.id === r.id} onclick={() => app.openRemote(r.id)}>
 							{r.name.toUpperCase()}
@@ -68,7 +72,10 @@
 			{/if}
 
 			<div class="hint">
-				{#if viewing}
+				{#if !viewing && !link && app.remotes.length}
+					This device has no bucket of its own. Pick a machine above to read its counts,
+					read-only.
+				{:else if viewing}
 					Read-only view of <b>{viewing.name}</b>. Nothing here is stored on this device, and
 					nothing here can be deleted from this app.
 				{:else}
@@ -101,11 +108,15 @@
 
 			{#if !rows.length}
 				<div class="none">
-					{viewing
-						? 'Nothing in that bucket.'
-						: link
-							? 'Nothing here yet.'
-							: 'Turn on cloud backup in settings first.'}
+					{#if viewing}
+						Nothing in that bucket.
+					{:else if link}
+						Nothing here yet.
+					{:else if app.remotes.length}
+						Pick a machine above to view its counts.
+					{:else}
+						Turn on cloud backup, or add a viewer profile, in settings first.
+					{/if}
 				</div>
 			{/if}
 		</div>

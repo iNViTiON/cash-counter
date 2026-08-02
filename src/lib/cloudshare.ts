@@ -29,6 +29,15 @@ export interface SharedConfig {
 	role: 'writer' | 'viewer';
 	accessKeyId: string;
 	secretAccessKey: string;
+	/**
+	 * What the token was made for. Carried so the viewer card can *detect* a
+	 * read-write token being pasted in rather than only warning about it in
+	 * prose — the app cannot inspect a token's real scope, but it can at least
+	 * notice when the sending device said it was a backup key.
+	 */
+	kind?: 'backup' | 'viewer';
+	/** Profile name, for viewer tokens. */
+	name?: string;
 }
 
 /** Binary-safe base64url — the payload is UTF-8 and may hold non-ASCII. */
@@ -61,6 +70,7 @@ function sum(s: string): string {
 
 export function encodeConfig(cfg: CloudCfg, key: CloudKey): string {
 	const payload: SharedConfig = {
+		kind: 'backup',
 		endpoint: cfg.endpoint,
 		bucket: cfg.bucket,
 		region: cfg.region,
@@ -113,9 +123,42 @@ export function decodeConfig(token: string): DecodeResult {
 			cloudAge: parsed.cloudAge === 7 ? 7 : 31,
 			role: parsed.role === 'viewer' ? 'viewer' : 'writer',
 			accessKeyId: String(parsed.accessKeyId),
-			secretAccessKey: String(parsed.secretAccessKey)
+			secretAccessKey: String(parsed.secretAccessKey),
+			kind: parsed.kind === 'viewer' ? 'viewer' : 'backup',
+			name: parsed.name ? String(parsed.name) : undefined
 		}
 	};
+}
+
+/**
+ * A viewer profile as a token. The embedded key should be scoped **Object Read
+ * only** — this cannot verify that, and says so wherever the token is shown.
+ */
+export function encodeViewer(r: {
+	name: string;
+	endpoint: string;
+	bucket: string;
+	region: string;
+	style: 'path' | 'vhost';
+	prefix: string;
+	accessKeyId: string;
+	secretAccessKey: string;
+}): string {
+	const payload: SharedConfig = {
+		kind: 'viewer',
+		name: r.name,
+		endpoint: r.endpoint,
+		bucket: r.bucket,
+		region: r.region,
+		style: r.style,
+		prefix: r.prefix,
+		cloudAge: 31,
+		role: 'viewer',
+		accessKeyId: r.accessKeyId,
+		secretAccessKey: r.secretAccessKey
+	};
+	const body = toB64(JSON.stringify(payload));
+	return `${PREFIX}.${body}.${sum(body)}`;
 }
 
 function normalisePrefix(p: string): string {

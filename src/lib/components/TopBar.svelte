@@ -21,8 +21,13 @@
 		</button>
 	{/if}
 
-	<!-- Conditional, so the bar is byte-identical on an unconfigured device. -->
-	{#if app.link?.ready}
+	<!--
+		Conditional, so the bar is byte-identical on an unconfigured device — but
+		viewer profiles count too. A view-only tablet has no bucket of its own, so
+		gating this on `link` alone left the archive, and therefore every viewer
+		profile, unreachable on exactly the device the feature exists for.
+	-->
+	{#if app.link?.ready || app.remotes.length}
 		<button type="button" class="btn icon" title="Archive" onclick={() => (app.view = 'archive')}>
 			☁
 		</button>
