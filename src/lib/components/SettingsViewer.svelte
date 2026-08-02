@@ -40,6 +40,9 @@
 	let shareToken = $state('');
 	let shareName = $state('');
 	let importText = $state('');
+	let importName = $state('');
+	/** Which token `importName` was filled from, so a re-paste re-prefills it. */
+	let namedFor = $state('');
 	let importErr = $state('');
 	/** Set when the pasted token says it was made as a backup (read-write) key. */
 	let importWarn = $state('');
@@ -57,11 +60,32 @@
 		if (locked) return unlock();
 		app.guard('Import a viewer profile', () => {
 			importText = '';
+			importName = '';
+			namedFor = '';
 			importErr = '';
 			importWarn = '';
 			share = 'import';
 		});
 	}
+
+	/**
+	 * Decodes as you paste so the name can be shown and edited *before*
+	 * importing. The name is this device's label for that machine — the sender's
+	 * choice is only a suggestion, and two tills can easily arrive with the same
+	 * one. A backup-kind token carries no name at all.
+	 */
+	const preview = $derived(importText.trim() ? decodeConfig(importText) : null);
+
+	$effect(() => {
+		const p = preview;
+		if (!p?.ok) return;
+		// Re-prefill only when a different string is pasted, so typing a name is
+		// not undone on the next keystroke.
+		if (namedFor !== importText) {
+			importName = p.config.name || p.config.bucket || '';
+			namedFor = importText;
+		}
+	});
 
 	function applyImport(): void {
 		const res = decodeConfig(importText);
@@ -78,7 +102,7 @@
 			return;
 		}
 		app.addRemote({
-			name: c.name || c.bucket || 'Imported',
+			name: importName.trim() || c.name || c.bucket || 'Imported',
 			endpoint: c.endpoint,
 			bucket: c.bucket,
 			region: c.region,
@@ -238,6 +262,15 @@
 					bind:value={importText}
 					oninput={() => { importErr = ''; importWarn = ''; }}
 				></textarea>
+				{#if preview?.ok}
+					<label class="f">
+						<span>Name on this device</span>
+						<input class="field prose" type="text" bind:value={importName} placeholder="Till 2" />
+					</label>
+					<div class="hint">
+						{preview.config.bucket}{preview.config.prefix ? ` · ${preview.config.prefix}` : ''}
+					</div>
+				{/if}
 				{#if importErr}<div class="imp-err">{importErr}</div>{/if}
 				{#if importWarn}<div class="warn">{importWarn}</div>{/if}
 				<button type="button" class="btn-primary act" onclick={applyImport}>
