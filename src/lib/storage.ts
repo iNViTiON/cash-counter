@@ -16,7 +16,13 @@ export const K = {
 	 * fires from a dozen unrelated places — a wholesale `cfg` rewrite must never
 	 * be able to clobber or resurrect the PIN.
 	 */
-	lock: 'ec.lock'
+	lock: 'ec.lock',
+	/**
+	 * Read-only credentials for OTHER machines' buckets. Kept apart from
+	 * `ec.cloud.key`, which is this device's own read-write pair, and the two
+	 * are never read by the same code path.
+	 */
+	remotes: 'ec.remotes'
 } as const;
 
 /** Read once by `migrate.ts`, then removed. Nothing else may touch these. */

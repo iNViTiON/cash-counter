@@ -3,6 +3,7 @@
 	import { app } from '$lib/state.svelte';
 	import type { PadSize, PhotoMax } from '$lib/types';
 	import CloudCard from './CloudCard.svelte';
+	import SettingsViewer from './SettingsViewer.svelte';
 	import SettingsPin from './SettingsPin.svelte';
 
 	const PAD_SIZES: Array<[string, PadSize]> = [
@@ -281,6 +282,8 @@
 			<SettingsPin />
 
 			<CloudCard />
+
+			<SettingsViewer />
 
 			<section class="card">
 				<div class="head">

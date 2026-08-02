@@ -125,8 +125,37 @@ where it would paint over the "Saved · …" the user needs to see. Only a run t
 user asked for passes `loud`. The failure still lands in `status`/`lastError`,
 which the settings card renders.
 
+**The cloud viewer is a screen, not a mode.** The archive gains a profile
+picker; pointing it at another machine's bucket changes what that screen lists
+and nothing else. The app keeps counting and saving normally — there is no
+whole-app read-only state, no dimming and no viewer bar, because viewing another
+till's records is not a reason to stop working.
+
+- **Remote data lives in `viewer.svelte.ts` and only there.** It never reaches
+  `app.slots`, so `#prune()` — which runs on save/load against the *local*
+  retention window — can never see it, and no persistence path can write it here.
+- `src/lib/remote.ts` exports `list` and `get` and **nothing else**. That absence
+  is the read-only enforcement; a `readOnly: true` flag would only invite a
+  future branch to ignore it. What it cannot enforce: whoever holds a viewer
+  profile holds a bucket credential and can use it with curl. The real control is
+  the token's scope, and the real revocation is rotating it on the source machine.
+- **Two different PINs.** `app.lock.pin` is this device's. A source machine's PIN
+  is read from its `meta/lock.json`, held in a local `const` for the length of
+  `openRemote`, and discarded — never `$state`, never storage, never a profile.
+  It gates the screen only, and the bucket's read key is a superset of it.
+- Clearing a PIN writes `{"pin":""}` rather than deleting the object: deleting
+  needs a scope the owner may not have, and it would collapse "no PIN set" and
+  "this key cannot read meta/" into the same 404. Entry refuses on 403 and on
+  network failure rather than failing open.
+- `ec.cloud.key` is this device's read-write pair for its own bucket;
+  `ec.remotes` holds read-only keys for other machines'. The viewer path never
+  reads the former and the sync path never reads the latter.
+
 **Offline is a hard requirement** for counting and saving: those must work with
-no network, and sync is strictly additive on top. Sync never blocks a save.
+no network, and sync is strictly additive on top. Sync never blocks a save. The
+viewer is the one feature that genuinely cannot work offline — it must never
+make an offline path *look* broken, but it is allowed to say it needs a
+connection.
 Nothing may be fetched at runtime. Fonts are self-hosted in `static/fonts/` for
 this reason — a Google Fonts `<link>` would break the first offline load. Any new
 asset type must be added to `workbox.globPatterns` in `vite.config.ts` or it

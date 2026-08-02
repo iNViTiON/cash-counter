@@ -4,7 +4,27 @@
 	import type { ArchiveRow } from '$lib/types';
 
 	const link = $derived(app.link);
-	const rows = $derived(link?.merged ?? []);
+	const viewing = $derived(app.viewer?.active ?? null);
+
+	/**
+	 * Own bucket: local slots merged with cloud objects, badged. Another
+	 * machine's: its objects alone, read-only. Nothing from a remote bucket ever
+	 * enters `app.slots`, so local retention pruning can never see it.
+	 */
+	const rows = $derived<ArchiveRow[]>(
+		viewing
+			? (app.viewer?.entries ?? []).map((e) => ({
+					id: e.id,
+					ts: e.ts,
+					label: e.label ?? '',
+					date: e.date ?? '',
+					total: e.total ?? 0,
+					where: 'cloud' as const,
+					local: null,
+					cloud: e
+				}))
+			: (link?.merged ?? [])
+	);
 
 	function open(row: ArchiveRow): void {
 		app.openId = row.id;
@@ -14,7 +34,7 @@
 	// Fill in labels and totals for everything, not just the background batch —
 	// the user is looking at the list, so the round trips are worth it here.
 	$effect(() => {
-		void app.link?.fillAllMeta();
+		if (!app.viewer?.active) void app.link?.fillAllMeta();
 	});
 </script>
 
@@ -22,19 +42,46 @@
 	<div class="bar">
 		<div class="title">Archive</div>
 		<div class="spacer"></div>
-		<button type="button" class="btn refresh" onclick={() => app.link?.backupNow()}>REFRESH</button>
+		<button
+			type="button"
+			class="btn refresh"
+			onclick={() => (viewing ? app.viewer?.refresh() : app.link?.backupNow())}
+		>
+			REFRESH
+		</button>
 		<button type="button" class="btn-primary done" onclick={() => (app.view = null)}>DONE</button>
 	</div>
 
 	<div class="sc body">
 		<div class="stack">
+			{#if app.remotes.length}
+				<div class="seg picker">
+					<button type="button" class:on={!viewing} onclick={() => app.viewer?.showLocal()}>
+						THIS DEVICE
+					</button>
+					{#each app.remotes as r (r.id)}
+						<button type="button" class:on={viewing?.id === r.id} onclick={() => app.openRemote(r.id)}>
+							{r.name.toUpperCase()}
+						</button>
+					{/each}
+				</div>
+			{/if}
+
 			<div class="hint">
-				Everything this device has, plus everything in the bucket. Deleting here removes the local
-				copy only — cloud objects go when the cloud retention window passes.
+				{#if viewing}
+					Read-only view of <b>{viewing.name}</b>. Nothing here is stored on this device, and
+					nothing here can be deleted from this app.
+				{:else}
+					Everything this device has, plus everything in the bucket. Deleting here removes the
+					local copy only — cloud objects go when the cloud retention window passes.
+				{/if}
 			</div>
 
-			{#if link?.status === 'error' && link.lastError}
-				<div class="hint err">{link.lastError}</div>
+			{#if viewing && app.viewer?.status === 'loading'}
+				<div class="hint">Reading {viewing.name}…</div>
+			{/if}
+			{#if viewing ? app.viewer?.error : link?.status === 'error' && link.lastError}
+				<div class="hint err">{viewing ? app.viewer?.error : link?.lastError}</div>
 			{/if}
 
 			<div class="labels">
@@ -54,7 +101,11 @@
 
 			{#if !rows.length}
 				<div class="none">
-					{link ? 'Nothing here yet.' : 'Turn on cloud backup in settings first.'}
+					{viewing
+						? 'Nothing in that bucket.'
+						: link
+							? 'Nothing here yet.'
+							: 'Turn on cloud backup in settings first.'}
 				</div>
 			{/if}
 		</div>
@@ -154,5 +205,15 @@
 
 	.err {
 		color: var(--danger);
+	}
+
+	.picker {
+		flex-wrap: wrap;
+	}
+
+	.picker button {
+		flex: 1 1 auto;
+		min-width: 96px;
+		padding: 0 12px;
 	}
 </style>

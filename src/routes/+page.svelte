@@ -61,7 +61,22 @@
 	 * The archive detail. A cloud-only row has no local `Slot`, so one is built
 	 * from the cached index — it is display data only and never reaches storage.
 	 */
-	const archRow = $derived(app.link?.merged.find((r) => r.id === app.openId) ?? null);
+	const archRow = $derived(
+		app.viewer?.active
+			? (app.viewer.entries
+					.filter((e) => e.id === app.openId)
+					.map((e) => ({
+						id: e.id,
+						ts: e.ts,
+						label: e.label ?? '',
+						date: e.date ?? '',
+						total: e.total ?? 0,
+						where: 'cloud' as const,
+						local: null,
+						cloud: e
+					}))[0] ?? null)
+			: (app.link?.merged.find((r) => r.id === app.openId) ?? null)
+	);
 	const archSlot = $derived(
 		archRow
 			? (archRow.local ?? {
@@ -76,8 +91,20 @@
 				})
 			: null
 	);
-	const cloudPhoto = (): Promise<Blob | null> =>
-		archRow?.cloud ? (app.link?.cloudPhoto(archRow.cloud) ?? Promise.resolve(null)) : Promise.resolve(null);
+	/**
+	 * Evidence for an archive row. A remote profile serves from its own cached
+	 * object URLs, keyed by profile so one machine's photo can never surface
+	 * under another's slot.
+	 */
+	const cloudPhoto = async (): Promise<Blob | null> => {
+		const entry = archRow?.cloud;
+		if (!entry) return null;
+		if (app.viewer?.active) {
+			const url = await app.viewer.photoUrl(entry);
+			return url ? fetch(url).then((r) => r.blob()) : null;
+		}
+		return (await app.link?.cloudPhoto(entry)) ?? null;
+	};
 
 	onMount(() => {
 		app.hydrate();

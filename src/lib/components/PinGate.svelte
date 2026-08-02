@@ -17,15 +17,19 @@
 	};
 
 	const gate = $derived(app.gate);
-	const title = $derived(gate ? (TITLES[gate.kind] ?? 'ADMIN PIN') : '');
+	const title = $derived(
+		gate ? (gate.kind === 'source' ? `PIN FOR “${gate.who}”` : (TITLES[gate.kind] ?? 'ADMIN PIN')) : ''
+	);
 	const step = $derived(
-		gate?.step === 'new'
-			? `Enter a new PIN — ${PIN_MIN} to 8 digits.`
-			: gate?.step === 'confirm'
-				? 'Enter it once more to confirm.'
-				: gate?.kind === 'unlock'
-					? 'Enter the PIN to continue.'
-					: 'Enter the current PIN.'
+		gate?.kind === 'source'
+			? "This is the other machine's admin PIN, not this device's. It unlocks this screen only — it does not protect the bucket."
+			: gate?.step === 'new'
+				? `Enter a new PIN — ${PIN_MIN} to 8 digits.`
+				: gate?.step === 'confirm'
+					? 'Enter it once more to confirm.'
+					: gate?.kind === 'unlock'
+						? 'Enter the PIN to continue.'
+						: 'Enter the current PIN.'
 	);
 	const warn = $derived(gate?.kind === 'set' || gate?.kind === 'change');
 </script>

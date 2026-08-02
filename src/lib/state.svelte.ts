@@ -17,6 +17,7 @@ import {
 } from './store';
 import { K, read, remove, write } from './storage';
 import type { EncodedPhoto } from './photo';
+import type { Viewer } from './viewer.svelte';
 import type {
 	Cam,
 	Cfg,
@@ -34,6 +35,7 @@ import type {
 	PhotoMeta,
 	Qty,
 	Quick,
+	Remote,
 	SaveDay,
 	Slot,
 	StorageInfo,
@@ -116,6 +118,17 @@ class CashCounter {
 	 * no cloud module in the bundle graph.
 	 */
 	cloudCfg = $state<CloudCfg>(defaultCloud());
+	/**
+	 * Read-only keys to other machines' buckets. Managed here, in localStorage,
+	 * so the settings card works with no viewer module loaded.
+	 *
+	 * Hard boundary: `ec.cloud.key` is *this* device's read-write pair for *its
+	 * own* bucket; these are read-only keys for *other* machines'. The viewer
+	 * path never reads the former and the sync path never reads these.
+	 */
+	remotes = $state<Remote[]>([]);
+	/** Session-only viewer engine, dynamically imported when first needed. */
+	viewer = $state<Viewer | null>(null);
 
 	/* ---------- lock ---------- */
 	lock = $state<Lock>({ pin: '' });
@@ -229,10 +242,84 @@ class CashCounter {
 		this.lock = { pin: String(lock?.pin ?? '').replace(/\D/g, '').slice(0, PIN_MAX) };
 
 		this.cloudCfg = readCloud();
+		const remotes = read<Remote[]>(K.remotes, []);
+		this.remotes = Array.isArray(remotes) ? remotes : [];
 	}
 
 	persistCloud(): void {
 		writeCloud($state.snapshot(this.cloudCfg));
+	}
+
+	persistRemotes(): void {
+		this.#write(K.remotes, $state.snapshot(this.remotes));
+	}
+
+	addRemote(r: Omit<Remote, 'id' | 'addedAt'>): void {
+		this.#allow(`Add the viewer profile "${r.name}"`, () => {
+			const prefix = r.prefix.trim();
+			this.remotes = [
+				...this.remotes,
+				{
+					...r,
+					prefix: prefix && !prefix.endsWith('/') ? `${prefix}/` : prefix,
+					id: crypto.randomUUID(),
+					addedAt: Date.now()
+				}
+			];
+			this.persistRemotes();
+			this.say('Viewer profile added');
+		});
+	}
+
+	removeRemote(id: string): void {
+		this.#allow('Remove this viewer profile', () => {
+			this.remotes = this.remotes.filter((p) => p.id !== id);
+			this.persistRemotes();
+			if (this.viewer?.active?.id === id) this.viewer.showLocal();
+		});
+	}
+
+	/**
+	 * Points the archive at another machine's bucket.
+	 *
+	 * The source machine's PIN is held in a local `const` for the length of this
+	 * call and discarded. It is never assigned to `$state`, never written to
+	 * storage, never put in a profile — the only PIN this device keeps is
+	 * `app.lock.pin`.
+	 */
+	async openRemote(id: string): Promise<void> {
+		const profile = this.remotes.find((p) => p.id === id);
+		if (!profile) return;
+		const m = await import('./viewer.svelte');
+		this.viewer = m.viewer;
+
+		let sourcePin: string | null;
+		try {
+			sourcePin = await m.viewer.requiredPin(profile);
+		} catch (e) {
+			// Refuse on 403 or a network failure rather than failing open: showing
+			// the data when the check could not run implies a check that did not
+			// happen. A 403 specifically means the key cannot read `meta/`.
+			m.viewer.status = 'error';
+			m.viewer.error =
+				e && typeof e === 'object' && 'kind' in e && e.kind === 'auth'
+					? 'That key cannot read meta/lock.json — check its scope'
+					: e instanceof Error
+						? e.message
+						: 'Could not reach that bucket';
+			this.say(m.viewer.error);
+			return;
+		}
+
+		if (!sourcePin) {
+			await m.viewer.open(profile);
+			this.view = 'archive';
+			return;
+		}
+		this.#askSourcePin(profile.name, sourcePin, () => {
+			void m.viewer.open(profile);
+			this.view = 'archive';
+		});
 	}
 
 	/**
@@ -437,6 +524,8 @@ class CashCounter {
 		this.gate = null;
 		this.#pending = null;
 		this.#draft = '';
+		// The other machine's PIN does not outlive the sheet that asked for it.
+		this.#sourcePin = '';
 		this.pinEntry = '';
 		this.pinErr = '';
 		this.pinTries = 0;
@@ -490,10 +579,38 @@ class CashCounter {
 		this.#closeGate();
 	}
 
+	/**
+	 * Prompts for ANOTHER machine's PIN. `expected` stays a parameter and a
+	 * closure variable — it is never stored, and `this.lock.pin` is untouched.
+	 * This gates the screen only; whoever holds the profile already holds a
+	 * bucket credential and could have read this PIN out of the bucket.
+	 */
+	#askSourcePin(who: string, expected: string, job: () => void): void {
+		this.#closeGate();
+		this.#sourcePin = expected;
+		this.#pending = job;
+		this.gate = { kind: 'source', why: `Unlock "${who}"`, step: 'verify', who };
+	}
+
+	#sourcePin = '';
+
 	pinSubmit(): void {
 		const g = this.gate;
 		if (!g) return;
 		const entry = this.pinEntry;
+
+		if (g.kind === 'source') {
+			if (entry !== this.#sourcePin) {
+				this.pinEntry = '';
+				this.pinTries += 1;
+				this.pinErr = 'Wrong PIN';
+				return;
+			}
+			const job = this.#pending;
+			this.#closeGate();
+			void job?.();
+			return;
+		}
 
 		if (g.step === 'verify') {
 			if (entry !== this.lock.pin) {
