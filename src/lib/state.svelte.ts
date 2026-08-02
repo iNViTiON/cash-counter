@@ -225,9 +225,15 @@ class CashCounter {
 
 	/* ---------- persistence ---------- */
 
+	/**
+	 * localStorage, which now holds only settings and the working count. Both are
+	 * a few hundred bytes, so a failure here means something else on this origin
+	 * has eaten the 5 MB — telling the user to delete a photo would be useless
+	 * advice, since photos are not in this pool any more.
+	 */
 	#write(key: string, value: unknown): boolean {
 		if (write(key, value)) return true;
-		this.say('Storage full — remove a photo or a slot');
+		this.say('Could not save settings on this device');
 		return false;
 	}
 
