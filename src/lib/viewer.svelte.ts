@@ -60,22 +60,47 @@ export class Viewer {
 		return doc?.pin ? doc.pin : null;
 	}
 
+	/**
+	 * Lists a profile's bucket. Also the refresh path — `refresh()` is this call
+	 * with the profile already open.
+	 *
+	 * **Clearing is conditional on actually switching.** Blanking a populated list
+	 * on a failed refresh is the one thing that reads as data loss, and clearing
+	 * up front made the catch block's promise to keep the old rows impossible to
+	 * keep: there were none left to keep by the time it ran. Switching profiles
+	 * still clears, because rows from the previous machine must never be on screen
+	 * under this one's name.
+	 */
 	async open(r: Remote): Promise<void> {
-		releaseRemotePhotos();
+		const switching = this.active?.id !== r.id;
+		if (switching) {
+			releaseRemotePhotos();
+			this.entries = [];
+		}
 		this.active = r;
-		this.entries = [];
 		this.status = 'loading';
 		this.error = '';
 		try {
 			const index = await remoteIndex(r);
-			this.entries = index;
+			// Cloud objects are immutable, so an entry already fetched stays valid
+			// forever — a refresh only ever gains and loses rows. Carrying the
+			// filled ones over keeps labels and totals on screen instead of
+			// flashing back to placeholders, and saves re-fetching every body.
+			if (switching) {
+				this.entries = index;
+			} else {
+				const seen = new Map(this.entries.map((e) => [e.id, e]));
+				this.entries = index.map((e) => {
+					const old = seen.get(e.id);
+					return old?.meta === 'ok' ? old : e;
+				});
+			}
 			await this.#fill(r);
 			this.status = 'ready';
 		} catch (e) {
 			this.status = 'error';
 			this.error = e instanceof Error ? e.message : 'Could not read that bucket';
-			// Keep whatever is already listed. Blanking a populated list on a
-			// failed refresh is the one thing that reads as data loss.
+			// Whatever was listed before stays listed, with the error beside it.
 		}
 	}
 

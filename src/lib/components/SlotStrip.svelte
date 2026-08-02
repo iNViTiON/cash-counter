@@ -581,4 +581,75 @@
 		width: 60px;
 		white-space: pre-line;
 	}
+
+	/*
+	 * On a phone the rail has to wrap onto its own line.
+	 *
+	 * The design mocks this bar at desktop width, where the profile picker and the
+	 * quick slot leave plenty of room. At 375px they take 268px of 375 between
+	 * them and the rail collapses to 69px — not one chip fits, on the app's
+	 * primary list surface, on the device it actually runs on. So below 620px the
+	 * controls share one line and the chips get the full width underneath.
+	 *
+	 * The extra height is paid for out of the keypad: the footer sits outside
+	 * `.mid`, and the `ResizeObserver` there re-runs `measure()`, so the pad
+	 * re-sizes itself. Both caps un-rotate and the quick buttons go side by side
+	 * to keep that bill as small as possible.
+	 */
+	@media (max-width: 620px) {
+		footer {
+			flex-wrap: wrap;
+			row-gap: 7px;
+		}
+
+		.lead {
+			flex-direction: row;
+			align-items: center;
+			gap: 8px;
+		}
+
+		/*
+		 * The two controls have to fit one line between them, or the bar wraps to
+		 * three rows and costs the keypad another 30px. "SLOTS" is what gives:
+		 * a `▣ THIS DEVICE` button sitting directly above a row of slot chips is
+		 * already labelled. "QUICK" stays — it is the only thing distinguishing
+		 * its SAVE from the real one.
+		 */
+		.lead > .cap {
+			display: none;
+		}
+
+		.prof-name {
+			max-width: 90px;
+		}
+
+		.cap.vert {
+			writing-mode: horizontal-tb;
+			transform: none;
+			height: auto;
+		}
+
+		.quick {
+			margin-left: auto;
+			padding-left: 8px;
+		}
+
+		.quick-btns {
+			flex-direction: row;
+		}
+
+		.tiny {
+			padding: 0 10px;
+		}
+
+		.quick-info {
+			width: 48px;
+		}
+
+		/* Forced onto its own line, under both controls. */
+		.rail {
+			order: 3;
+			flex: 1 0 100%;
+		}
+	}
 </style>
